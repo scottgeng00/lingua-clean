@@ -1,13 +1,6 @@
 # lingua-clean
 
-A surface-level cleanup of [lingua](https://github.com/facebookresearch/lingua)
-focused on a self-contained subset of knowledge-distillation (KD) ablations
-for **OLMo-2-0425-1B mid-training on the Dolmino splits at 28800 steps**.
-
-This is a *port*, not a rewrite: same training driver, same APIs, same outputs
-as the upstream research repo. The only difference is that we drop ~40 loss
-functions and their dispatch paths that aren't needed for the supported
-recipes, and we provide a single launch-script entry point.
+A built on top of [lingua](https://github.com/facebookresearch/lingua).
 
 ## Supported recipes
 
@@ -72,17 +65,6 @@ lingua-clean/
     └── _sbatch_inner.sh                       ← runs INSIDE sbatch / srun
 ```
 
-The `apps/main/train.py` here is the same training driver as upstream lingua
-with the unused `compute_*_loss` functions removed. The removed names are kept
-as stubs that raise `NotImplementedError` so the dispatch chain inside `train()`
-still parses cleanly (the corresponding `use_<X>` flags default to `False` and
-are not exposed in any supported recipe, so the stub bodies are unreachable at
-runtime).
-
-Note: `lingua/data.py` was left intact (the `DataArgs` dataclass has dozens of
-deeply-commented interdependent fields; pruning them was high-risk for low
-benefit since unused flags default to `False` and have no runtime cost).
-
 ## Setup
 
 1. Activate the existing `lingua` conda env (the one the original repo uses).
@@ -136,8 +118,7 @@ benefit since unused flags default to `False` and have no runtime cost).
 4. Download teachers (`OLMo-2-0425-1B-Instruct`, `OLMo-2-1124-7B-Instruct`) and
    the student init checkpoint (`OLMo-2-0425-1B-stage1-4001B`) into
    `${TEACHER_1B_PATH}`, `${TEACHER_7B_PATH}`, and `${STUDENT_INIT_PATH}`
-   respectively. Use `setup/download_hf_ckpt.py` or download manually from the
-   AI2 Hugging Face org.
+   respectively. Use `setup/download_hf_ckpt.py` or download manually from HuggingFace.
 
 5. Download and shard the Dolmino mid-training mix (DCLM / FLAN / Math / Wiki /
    pes2o / StackExchange splits) into `${DATA_ROOT}`. Use
@@ -177,49 +158,3 @@ Per-token (H_T, H_S) gate-overlap analysis backing the paper's "entropy-gating
 is real" claim for the `idx139` recipe (originally `rkl_entgate_q30_lam1p0`) lives under
 `analysis/idx139/`. See `analysis/idx139/README.md` for the workflow.
 
-## What was dropped
-
-Compared to upstream `apps/main/train.py`:
-- Removed 39 `compute_*_loss` functions that none of the supported recipes use.
-  Each removed name is kept as a `_removed_loss(name)` stub at the top of
-  `apps/main/train.py` so the dispatch chain still parses; calling one raises
-  `NotImplementedError`. The full removed list (from `train.py`):
-  - **Two-teacher / merged-teacher KD:** `compute_two_teacher_geometric_kd_loss`,
-    `compute_projected_two_teacher_kd_loss`,
-    `compute_agreement_gated_two_teacher_kd_loss`,
-    `compute_competence_routed_two_teacher_kd_loss`,
-    `compute_intersection_projected_kd_loss`.
-  - **Residual / hybrid / projected / geometric KD:**
-    `compute_hybrid_residual_kd_loss`, `compute_projected_kd_loss`,
-    `compute_geometric_kd_loss`, `compute_akl_distillation_loss`,
-    `compute_bucket_aware_kd_loss`, `compute_entropy_gated_kd_loss`,
-    `compute_selective_kd_loss`.
-  - **Rho1 family:** `compute_rho1_loss`, `compute_rho1_kd_loss`,
-    `compute_rho1_expert_stratified_loss`.
-  - **RKL-with-extra-CE-gate family:** `compute_rkl_with_gated_ce_loss`,
-    `compute_rkl_with_lowent_ce_loss`, `compute_rkl_with_source_ce_loss`,
-    `compute_rkl_with_teacher_disagree_ce_loss`,
-    `compute_rkl_with_teacher_fail_ce_loss`,
-    `compute_rkl_with_teacher_success_ce_loss`,
-    `compute_rkl_with_topk_gap_ce_loss`,
-    `compute_rkl_with_topk_gap_ce_replace_loss`,
-    `compute_rkl_with_gradagree_gap_ce_loss`.
-  - **Frontier / EMA / margin family:** `compute_frontier_band_loss`,
-    `compute_frontierv2_loss`, `compute_frontierv3_loss`,
-    `compute_frontierv4_loss`, `compute_ema_frontier_loss`,
-    `compute_ema_ref_loss`, `compute_margin_constraint_loss`,
-    `compute_entropy_aware_margin_loss`.
-  - **Best-expert / SIW / LWT / MILE / REMIT / teacher-critic:**
-    `compute_best_expert_loss`, `compute_best_expert_seq_kd_loss`,
-    `compute_siw_loss`, `compute_lwt_loss`, `compute_mile_loss`,
-    `compute_remit_loss`, `compute_teacher_critic_loss`.
-- Kept the dispatch chain inside `train()` unchanged so callers and config
-  flags behave identically to upstream; the removed `use_<X>` flags simply
-  default to `False` in the supported recipes.
-- All scripts in the upstream `lingua/` root (`ce_kl_*`, `diag_*`, `rho1_*`,
-  `s3_forensics_*`, `analyze_*`, `bakd_*`, `merge_*`, `precompute_*`, all
-  `relaunch_*`, all `synth_*`, the dozens of one-off `*.sh` launchers and
-  Python analysis utilities) are not included. Only the four `setup/` scripts
-  needed for env bootstrap are copied.
-- `lingua/custom_data.py` (factuality / retrieved-context dataloader used only
-  by a separate JH project) was also dropped; no supported recipe imports it.
