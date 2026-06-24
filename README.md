@@ -1,6 +1,6 @@
 # lingua-clean
 
-A built on top of [lingua](https://github.com/facebookresearch/lingua).
+A build on top of [lingua](https://github.com/facebookresearch/lingua).
 
 ## Supported recipes
 
