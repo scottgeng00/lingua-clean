@@ -26,12 +26,13 @@
 
 set -euo pipefail
 
-: "${LINGUA_CLEAN_ROOT:?source scripts/env.sh first}"
 : "${STUDENT_HF_PATH:?source scripts/env.sh first}"
 
 CKPT_DIR="${1:?usage: bash scripts/lingua_to_hf.sh <ckpt_step_dir> [output_dir]}"
 OUT_DIR="${2:-${CKPT_DIR}/hf}"
 TOKENIZER_PATH="${TOKENIZER_PATH:-${STUDENT_HF_PATH}}"
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ ! -f "${CKPT_DIR}/.metadata" ]]; then
     echo "[lingua→hf] ERROR: ${CKPT_DIR} does not contain a DCP .metadata file." >&2
@@ -41,7 +42,7 @@ fi
 
 CONSOLIDATED_DIR="${CKPT_DIR}/consolidated"
 
-pushd "${LINGUA_CLEAN_ROOT}" >/dev/null
+pushd "${ROOT_DIR}" >/dev/null
 
 echo "[lingua→hf] Stage 1: consolidate DCP → ${CONSOLIDATED_DIR}"
 python setup/consolidate.py --ckpt_dir "${CKPT_DIR}"

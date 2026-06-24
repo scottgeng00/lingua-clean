@@ -81,15 +81,15 @@ lingua-clean/
 2. Edit `scripts/env.sh` (or export the variables in your shell beforehand)
    so the paths point at where you've actually downloaded the data and
    checkpoints. By default everything lives under one deletable sandbox
-   dir, `${LINGUA_SANDBOX_ROOT}` (default `~/lingua-clean-sandbox`):
-   - `${LINGUA_SANDBOX_ROOT}/data/dolmino_splits/`             (Dolmino mid-train splits)
-   - `${LINGUA_SANDBOX_ROOT}/teachers/OLMo-2-0425-1B-Instruct/`
-   - `${LINGUA_SANDBOX_ROOT}/teachers/OLMo-2-1124-7B-Instruct/`
-   - `${LINGUA_SANDBOX_ROOT}/students/OLMo-2-0425-1B-stage1-4001B/`     (Lingua DCP root, `STUDENT_INIT_PATH`)
-   - `${LINGUA_SANDBOX_ROOT}/students/OLMo-2-0425-1B-stage1-4001B/hf/`  (HF mirror, `STUDENT_HF_PATH`)
-   - `${LINGUA_SANDBOX_ROOT}/runs/{midtrain,evals,analysis,slurm_logs}/`
+   dir, `${CACHE_DIR}` (default `~/lingua-clean-sandbox`):
+   - `${CACHE_DIR}/data/dolmino_splits/`             (Dolmino mid-train splits)
+   - `${CACHE_DIR}/teachers/OLMo-2-0425-1B-Instruct/`
+   - `${CACHE_DIR}/teachers/OLMo-2-1124-7B-Instruct/`
+   - `${CACHE_DIR}/students/OLMo-2-0425-1B-stage1-4001B/`     (Lingua DCP root, `STUDENT_INIT_PATH`)
+   - `${CACHE_DIR}/students/OLMo-2-0425-1B-stage1-4001B/hf/`  (HF mirror, `STUDENT_HF_PATH`)
+   - `${CACHE_DIR}/runs/{midtrain,evals,analysis,slurm_logs}/`
 
-   To start over: `rm -rf ${LINGUA_SANDBOX_ROOT}`. Override individual paths
+   To start over: `rm -rf ${CACHE_DIR}`. Override individual paths
    (e.g. point `DATA_ROOT` at a long-lived cache) to share artifacts across
    sandboxes.
 
@@ -103,10 +103,6 @@ lingua-clean/
    slurm uses site defaults if you leave them empty):
    - `SLURM_ACCOUNT`, `SLURM_QOS`, `SLURM_PARTITION` — appended to the
      `launch_midtrain.sh` sbatch command if non-empty.
-   - `SLURM_QOS_TEST` — dev-tier QOS used by `scripts/run_diagnostic.sh` and
-     `scripts/smoke_test.py` (default `h100_dev`).
-   - `SLURM_QOS_ANALYSIS` — small-job QOS for `analysis/idx139/*.sbatch`
-     (defaults to `SLURM_QOS_TEST`).
    - `WANDB_ENTITY` — wandb entity for all runs (leave empty to use your
      personal default).
 

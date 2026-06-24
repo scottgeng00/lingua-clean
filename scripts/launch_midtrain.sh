@@ -32,19 +32,19 @@ if [ -z "${RECIPE:-}" ]; then
     exit 1
 fi
 
-CLEAN_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Source the env script so DATA_ROOT, TEACHER_*_PATH, MIDTRAIN_ROOT, etc. are
 # set before sbatch hands them to the inner script (and before downstream tools
 # like OmegaConf's ${oc.env:...} resolve them).
-source "${CLEAN_ROOT}/scripts/env.sh"
+source "${ROOT_DIR}/scripts/env.sh"
 
-RECIPE_YAML="${CLEAN_ROOT}/apps/main/configs/recipes/${RECIPE}.yaml"
+RECIPE_YAML="${ROOT_DIR}/apps/main/configs/recipes/${RECIPE}.yaml"
 
 if [ ! -f "${RECIPE_YAML}" ]; then
     echo "ERROR: recipe YAML not found: ${RECIPE_YAML}" >&2
     echo "Available recipes:" >&2
-    ls "${CLEAN_ROOT}/apps/main/configs/recipes/" | sed 's/\.yaml$//' >&2
+    ls "${ROOT_DIR}/apps/main/configs/recipes/" | sed 's/\.yaml$//' >&2
     exit 1
 fi
 
@@ -95,8 +95,8 @@ if [ -n "${SLURM_PARTITION:-}" ]; then
 fi
 
 SBATCH_CMD+=(
-    --export=ALL,RECIPE,STEPS_OVERRIDE,LINGUA_TEACHER_FP8,LINGUA_COMPILE_TEACHER,CLEAN_ROOT,RECIPE_YAML,LINGUA_CLEAN_ROOT,DATA_ROOT,TEACHER_1B_PATH,TEACHER_7B_PATH,STUDENT_INIT_PATH,STUDENT_HF_PATH,TOKENIZER_PATH,MIDTRAIN_ROOT,EVAL_ROOT,SLURM_LOG_DIR,LINGUA_CONDA_ENV,OLMES_CONDA_ENV,CONDA_PROFILE_SH,WANDB_ENTITY
-    "${CLEAN_ROOT}/scripts/_sbatch_inner.sh"
+    --export=ALL,RECIPE,STEPS_OVERRIDE,LINGUA_TEACHER_FP8,LINGUA_COMPILE_TEACHER,ROOT_DIR,RECIPE_YAML,DATA_ROOT,TEACHER_1B_PATH,TEACHER_7B_PATH,STUDENT_INIT_PATH,STUDENT_HF_PATH,TOKENIZER_PATH,MIDTRAIN_ROOT,EVAL_ROOT,SLURM_LOG_DIR,LINGUA_CONDA_ENV,OLMES_CONDA_ENV,WANDB_ENTITY
+    "${ROOT_DIR}/scripts/_sbatch_inner.sh"
 )
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
@@ -104,7 +104,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     printf '  %q' "${SBATCH_CMD[@]}"
     printf '\n'
     echo
-    echo "Inner script: ${CLEAN_ROOT}/scripts/_sbatch_inner.sh"
+    echo "Inner script: ${ROOT_DIR}/scripts/_sbatch_inner.sh"
     echo "Recipe YAML:  ${RECIPE_YAML}"
     exit 0
 fi

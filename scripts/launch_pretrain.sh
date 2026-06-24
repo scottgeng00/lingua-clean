@@ -7,31 +7,31 @@
 # for pretraining (fewer nodes, fewer steps), and (2) the YAML lives in
 # `apps/main/configs/<CONFIG>.yaml` (top-level configs/) rather than
 # `apps/main/configs/recipes/<RECIPE>.yaml`. This keeps the from-scratch
-# `dclm_pt.yaml` separate from the mid-training KD recipe matrix.
+# `dolmino_pretrain.yaml` separate from the mid-training KD recipe matrix.
 #
 # Usage:
-#   CONFIG=dclm_pt bash scripts/launch_pretrain.sh                # submit
-#   CONFIG=dclm_pt DRY_RUN=1 bash scripts/launch_pretrain.sh      # print sbatch
+#   CONFIG=dolmino_pretrain bash scripts/launch_pretrain.sh                # submit
+#   CONFIG=dolmino_pretrain DRY_RUN=1 bash scripts/launch_pretrain.sh      # print sbatch
 #
 # Environment overrides:
-#   CONFIG=<name>           default `dclm_pt`. Resolves to apps/main/configs/<CONFIG>.yaml.
+#   CONFIG=<name>           default `dolmino_pretrain`. Resolves to apps/main/configs/<CONFIG>.yaml.
 #   NNODES=<int>            default 2 (matches the original pretrain_from_scratch_run.sh).
-#   STEPS_OVERRIDE=<int>    default 9600 (~26B DCLM tokens at the configured batch/seq).
+#   STEPS_OVERRIDE=<int>    default 9600 (~26B Dolmino tokens at the configured batch/seq).
 #   DRY_RUN=0|1             if 1, print the sbatch command and exit.
 
 set -euo pipefail
 
-CONFIG="${CONFIG:-dclm_pt}"
+CONFIG="${CONFIG:-dolmino_pretrain}"
 
-CLEAN_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-source "${CLEAN_ROOT}/scripts/env.sh"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${ROOT_DIR}/scripts/env.sh"
 
-CONFIG_YAML="${CLEAN_ROOT}/apps/main/configs/${CONFIG}.yaml"
+CONFIG_YAML="${ROOT_DIR}/apps/main/configs/${CONFIG}.yaml"
 
 if [ ! -f "${CONFIG_YAML}" ]; then
     echo "ERROR: pretrain config not found: ${CONFIG_YAML}" >&2
     echo "Available top-level configs:" >&2
-    ls "${CLEAN_ROOT}/apps/main/configs/" 2>/dev/null | grep -E '\.yaml$' | sed 's/\.yaml$//' >&2
+    ls "${ROOT_DIR}/apps/main/configs/" 2>/dev/null | grep -E '\.yaml$' | sed 's/\.yaml$//' >&2
     exit 1
 fi
 
@@ -79,8 +79,8 @@ RECIPE="${CONFIG}"
 RECIPE_YAML="${CONFIG_YAML}"
 
 SBATCH_CMD+=(
-    --export=ALL,RECIPE,STEPS_OVERRIDE,LINGUA_TEACHER_FP8,LINGUA_COMPILE_TEACHER,CLEAN_ROOT,RECIPE_YAML,LINGUA_CLEAN_ROOT,DATA_ROOT,TEACHER_1B_PATH,TEACHER_7B_PATH,STUDENT_INIT_PATH,STUDENT_HF_PATH,TOKENIZER_PATH,MIDTRAIN_ROOT,EVAL_ROOT,SLURM_LOG_DIR,LINGUA_CONDA_ENV,OLMES_CONDA_ENV,CONDA_PROFILE_SH,WANDB_ENTITY
-    "${CLEAN_ROOT}/scripts/_sbatch_inner.sh"
+    --export=ALL,RECIPE,STEPS_OVERRIDE,LINGUA_TEACHER_FP8,LINGUA_COMPILE_TEACHER,ROOT_DIR,RECIPE_YAML,DATA_ROOT,TEACHER_1B_PATH,TEACHER_7B_PATH,STUDENT_INIT_PATH,STUDENT_HF_PATH,TOKENIZER_PATH,MIDTRAIN_ROOT,EVAL_ROOT,SLURM_LOG_DIR,LINGUA_CONDA_ENV,OLMES_CONDA_ENV,WANDB_ENTITY
+    "${ROOT_DIR}/scripts/_sbatch_inner.sh"
 )
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
@@ -88,7 +88,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
     printf '  %q' "${SBATCH_CMD[@]}"
     printf '\n'
     echo
-    echo "Inner script: ${CLEAN_ROOT}/scripts/_sbatch_inner.sh"
+    echo "Inner script: ${ROOT_DIR}/scripts/_sbatch_inner.sh"
     echo "Config YAML:  ${CONFIG_YAML}"
     exit 0
 fi

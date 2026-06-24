@@ -1,10 +1,12 @@
-# From-scratch pretraining of a Llama-3.2-1B-shaped model on the full Dolmino
+# From-scratch pretraining of an OLMo-2-1B-shaped model on the full Dolmino
 # mid-train mix (same six shards / same weights as
 # `dolmino_midtrain_olmo2_v2.yaml`). Ported from the original lingua repo's
-# `apps/main/configs/dclm_pt.yaml` — same architecture and optimizer; the only
-# differences are (a) paths swapped for env vars and (b) data sources point at
-# the full Dolmino mix rather than the standalone DCLM-750B mix the upstream
-# config used.
+# `apps/main/configs/dclm_pt.yaml` — same optimizer; differences are
+# (a) paths swapped for env vars, (b) data sources point at the full Dolmino
+# mix rather than the standalone DCLM-750B mix the upstream config used, and
+# (c) model shape swapped from Llama-3.2-1B to OLMo-2-1B (matches the
+# `dolmino_expert_cpt_baseline_28800.yaml` student so a pretrain checkpoint
+# can be re-used as a mid-train init).
 #
 # Notes:
 #   - `checkpoint.init_ckpt_path: null` — this is from-scratch pretraining.
@@ -14,8 +16,8 @@
 #   - Eval is GSM8K via the lm-eval-harness (`harness:`), not OLMES — matches
 #     the original. Swap to `olmes:` if you want comparable numbers with the
 #     mid-training recipes.
-name: dclm-pt-llama-1b
-dump_dir: ${oc.env:MIDTRAIN_ROOT}/dclm_pt
+name: dolmino-pretrain-olmo2-1b
+dump_dir: ${oc.env:MIDTRAIN_ROOT}/dolmino_pretrain
 steps: 9600
 probe_freq: null
 seed: 777
@@ -39,16 +41,19 @@ distributed:
   selective_activation_checkpointing: false
   tp_size: 1
 
-# Llama-3.2-1B shape (matches original dclm_pt.yaml).
+# OLMo 2 1B model config (matches dolmino_expert_cpt_baseline_28800.yaml).
 model:
   dim: 2048
   n_layers: 16
-  n_heads: 32
-  head_dim: 64
-  n_kv_heads: 8
+  n_heads: 16
+  n_kv_heads: 16
   ffn_dim_multiplier: 1.5
+  multiple_of: 256
+  norm_eps: 1e-6
+  rope_theta: 500000
   weight_tying: false
-  norm_eps: 1e-5
+  qk_norm: true
+  post_norm: true
 
 checkpoint:
   init_ckpt_path: null

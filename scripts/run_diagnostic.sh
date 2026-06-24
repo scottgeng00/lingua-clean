@@ -21,10 +21,11 @@
 
 set -euo pipefail
 
-: "${LINGUA_CLEAN_ROOT:?source scripts/env.sh first}"
 : "${TEACHER_7B_PATH:?source scripts/env.sh first}"
 : "${STUDENT_HF_PATH:?source scripts/env.sh first}"
 : "${DATA_ROOT:?source scripts/env.sh first}"
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ONLY="${ONLY:-by_source,per_token,rlvr1,ht_hs}"
 RUN_PLOTS=0
@@ -39,7 +40,7 @@ done
 
 want() { [[ ",${ONLY}," == *",$1,"* ]]; }
 
-ANALYSIS_DIR="${LINGUA_CLEAN_ROOT}/analysis/idx139"
+ANALYSIS_DIR="${ROOT_DIR}/analysis/idx139"
 
 declare -A SBATCH_FILES=(
     [by_source]="${ANALYSIS_DIR}/teacher_entropy_by_source.sbatch"
@@ -59,8 +60,7 @@ fi
 
 SBATCH_BASE=(sbatch)
 [ -n "${SLURM_ACCOUNT:-}" ] && SBATCH_BASE+=(--account="${SLURM_ACCOUNT}")
-# Analysis jobs use the small-job QOS (falls back to SLURM_QOS via env.sh).
-[ -n "${SLURM_QOS_ANALYSIS:-}" ] && SBATCH_BASE+=(--qos="${SLURM_QOS_ANALYSIS}")
+[ -n "${SLURM_QOS:-}" ] && SBATCH_BASE+=(--qos="${SLURM_QOS}")
 [ -n "${SLURM_PARTITION:-}" ] && SBATCH_BASE+=(--partition="${SLURM_PARTITION}")
 
 SUBMITTED=()
@@ -97,15 +97,15 @@ if [ "$RUN_PLOTS" -eq 1 ]; then
             --error="${SLURM_LOG_DIR:-${HOME}/lingua-runs/slurm_logs}/idx139-plots-%j.err"
             --time=00:20:00 --cpus-per-task=4 --mem=32G
             --dependency="$DEP"
-            --wrap "set -e; cd '${LINGUA_CLEAN_ROOT}'; \
+            --wrap "set -e; cd '${ROOT_DIR}'; \
                 source scripts/env.sh; \
-                source \"\${CONDA_PROFILE_SH}\"; conda activate \"\${LINGUA_CONDA_ENV}\"; \
+                source \"\$(conda info --base)/etc/profile.d/conda.sh\"; conda activate \"\${LINGUA_CONDA_ENV}\"; \
                 python analysis/idx139/plot_entropy_histogram.py; \
                 python analysis/idx139/visualize_gate.py")
         "${PLOT_CMD[@]}"
     else
         echo "[diagnostic] --plots: no sbatch jobs to wait on; rendering now."
-        cd "${LINGUA_CLEAN_ROOT}"
+        cd "${ROOT_DIR}"
         python analysis/idx139/plot_entropy_histogram.py
         python analysis/idx139/visualize_gate.py
     fi

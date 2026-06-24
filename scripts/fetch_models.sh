@@ -29,11 +29,12 @@ set -euo pipefail
 # ProxyError. Compute nodes go direct, so unset rather than inherit.
 unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy X2P_PROXY_URL
 
-: "${LINGUA_CLEAN_ROOT:?source scripts/env.sh first}"
 : "${STUDENT_INIT_PATH:?source scripts/env.sh first}"
 : "${STUDENT_HF_PATH:?source scripts/env.sh first}"
 : "${TEACHER_1B_PATH:?source scripts/env.sh first}"
 : "${TEACHER_7B_PATH:?source scripts/env.sh first}"
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ONLY="${ONLY:-student,1b_teacher,7b_teacher}"
 INCLUDE_RLVR1="${INCLUDE_RLVR1:-0}"
@@ -61,7 +62,7 @@ if want student; then
     snapshot_download "allenai/OLMo-2-0425-1B" "${STUDENT_HF_PATH}"
 
     echo "[fetch] Student init → Lingua DCP at ${STUDENT_INIT_PATH}"
-    pushd "${LINGUA_CLEAN_ROOT}" >/dev/null
+    pushd "${ROOT_DIR}" >/dev/null
     python setup/hf_to_lingua_dcp.py \
         --model allenai/OLMo-2-0425-1B \
         --revision "${STUDENT_REVISION}" \

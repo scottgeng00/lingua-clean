@@ -1,36 +1,55 @@
 #!/usr/bin/env bash
 # bin/install_requirements.sh
 #
-# Install the Python deps required for lingua-clean training, eval, and
-# analysis. Modelled on BoLT/bin/install_requirements.sh but without the
-# data-prep section -- this script ONLY installs packages.
+# Set up the conda env for lingua-clean training, eval, and analysis.
+# Creates the env if it doesn't exist, then installs deps into it. Safe to
+# re-run -- pip skips already-satisfied packages.
 #
 # Pre-reqs:
-#   * conda env is already created and activated, e.g.:
-#       conda create -n lingua-clean python=3.11 -y
-#       conda activate lingua-clean
+#   * conda is installed and `conda` is on PATH.
 #   * CUDA 12.1-compatible drivers on the host (matches the torch wheels below).
 #
 # Usage:
-#   conda activate lingua-clean
-#   bash bin/install_requirements.sh
+#   bash bin/install_requirements.sh                  # uses env name from $LINGUA_CONDA_ENV (default: lingua-clean)
+#   LINGUA_CONDA_ENV=myenv bash bin/install_requirements.sh
 #
-# Skips work that has already been done -- safe to re-run.
+# Afterwards, activate the env yourself for interactive work:
+#   conda activate lingua-clean
 set -euo pipefail
 
-if [ -z "${CONDA_PREFIX:-}" ]; then
-    echo "ERROR: no conda env active. Activate one first:" >&2
-    echo "  conda create -n lingua-clean python=3.11 -y && conda activate lingua-clean" >&2
+ENV_NAME="${LINGUA_CONDA_ENV:-lingua-clean}"
+PY_VERSION="${PY_VERSION:-3.11}"
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Make `conda activate` work inside a non-interactive script. Try the env-var
+# override first (set by scripts/env.sh on this cluster), then fall back to
+# `conda info --base`.
+if [ -n "${CONDA_PROFILE_SH:-}" ] && [ -f "${CONDA_PROFILE_SH}" ]; then
+    # shellcheck disable=SC1090
+    source "${CONDA_PROFILE_SH}"
+elif command -v conda >/dev/null 2>&1; then
+    # shellcheck disable=SC1091
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+else
+    echo "ERROR: conda not on PATH. Install miniconda first." >&2
     exit 1
 fi
 
-CLEAN_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if conda env list | awk '{print $1}' | grep -qx "${ENV_NAME}"; then
+    echo "[install] conda env '${ENV_NAME}' already exists -- reusing"
+else
+    echo "[install] creating conda env '${ENV_NAME}' (python=${PY_VERSION})"
+    conda create -n "${ENV_NAME}" "python=${PY_VERSION}" -y
+fi
+
+conda activate "${ENV_NAME}"
 echo "[install] CONDA_PREFIX=${CONDA_PREFIX}"
-echo "[install] CLEAN_ROOT=${CLEAN_ROOT}"
+echo "[install] ROOT_DIR=${ROOT_DIR}"
 
 # --- 1. Lingua deps from requirements.txt (everything except the CUDA wheels) ---
 echo "[install] pip install -r requirements.txt"
-pip install -r "${CLEAN_ROOT}/requirements.txt"
+pip install -r "${ROOT_DIR}/requirements.txt"
 
 # --- 2. Torch + xformers (CUDA 12.1 wheels, matching the in-house setup) ---
 echo "[install] torch 2.5.0 + xformers 0.0.28.post2 (cu121)"
@@ -65,4 +84,5 @@ if missing:
 print("All checked imports OK.")
 PY
 
-echo "[install] Finished installing lingua-clean requirements."
+echo "[install] Finished installing lingua-clean requirements into env '${ENV_NAME}'."
+echo "[install] Activate it for interactive work:  conda activate ${ENV_NAME}"
