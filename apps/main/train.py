@@ -1110,7 +1110,6 @@ def compute_entropy_gated_rkl_loss(
 
     return total_loss, stats
 
-
 def compute_entropy_switched_rkl_loss(
     student_logits: torch.Tensor,
     teacher_logits: torch.Tensor,

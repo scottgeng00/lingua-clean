@@ -13,10 +13,13 @@
 export CACHE_DIR="${CACHE_DIR:-${HOME}/lingua-clean-sandbox}"
 
 # Data + checkpoints (set TEACHER_*_PATH / STUDENT_*_PATH to a shared cache to skip re-downloads).
-export DATA_ROOT="${DATA_ROOT:-${CACHE_DIR}/data/dolmino_splits}"
-export TEACHER_1B_PATH="${TEACHER_1B_PATH:-${CACHE_DIR}/teachers/OLMo-2-0425-1B-Instruct}"
-export TEACHER_7B_PATH="${TEACHER_7B_PATH:-${CACHE_DIR}/teachers/OLMo-2-1124-7B-Instruct}"
-export STUDENT_INIT_PATH="${STUDENT_INIT_PATH:-${CACHE_DIR}/students/OLMo-2-0425-1B-stage1-4001B}"  # Lingua DCP root
+# Data + checkpoints. Hardcoded to jacquelinehe's prepared shared artifacts so
+# collaborators with access to /checkpoint/comem/jacquelinehe run without
+# re-downloading/preparing. Override by exporting the var before sourcing.
+export DATA_ROOT="${DATA_ROOT:-/checkpoint/comem/jacquelinehe/official_lingua/data/dolmino_splits}"
+export TEACHER_1B_PATH="${TEACHER_1B_PATH:-/checkpoint/comem/jacquelinehe/lingua/pretrained_hf_ckpts/OLMo-2-0425-1B-Instruct}"
+export TEACHER_7B_PATH="${TEACHER_7B_PATH:-/checkpoint/comem/jacquelinehe/lingua/pretrained_hf_ckpts/OLMo-2-1124-7B-Instruct}"
+export STUDENT_INIT_PATH="${STUDENT_INIT_PATH:-/checkpoint/comem/jacquelinehe/lingua/pretrained_hf_ckpts/OLMo-2-0425-1B-stage1-4001B}"  # Lingua DCP root
 export STUDENT_HF_PATH="${STUDENT_HF_PATH:-${STUDENT_INIT_PATH}/hf}"                                # HF mirror
 export TOKENIZER_PATH="${TOKENIZER_PATH:-${STUDENT_HF_PATH}}"
 
