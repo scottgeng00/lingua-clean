@@ -43,9 +43,13 @@ from pathlib import Path
 
 import requests
 from huggingface_hub import snapshot_download
+from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
 
 HF_REPO = "allenai/dolmino-mix-1124"
 DOMAINS = ["dclm", "flan", "math", "pes2o", "stackexchange", "wiki"]
+# Raw shard formats vary by domain (dclm: .json.zst, flan: .json.gz, math: mostly
+# plain .jsonl), all JSON-lines with a "text" field.
+RAW_PATTERNS = ["*.json", "*.jsonl", "*.json.gz", "*.jsonl.gz", "*.json.zst", "*.jsonl.zst"]
 
 
 def run(cmd: str):
@@ -53,7 +57,9 @@ def run(cmd: str):
     subprocess.run(cmd, shell=True, check=True, executable="/bin/bash")
 
 
-def snapshot_with_retries(repo_id, local_dir, allow_patterns, max_retries=5, delay=10):
+def snapshot_with_retries(repo_id, local_dir, allow_patterns, max_retries=20, delay=300):
+    # delay matches the Hub's 5-minute rate-limit window (HTTP 429); already
+    # downloaded files are skipped on each retry.
     for attempt in range(max_retries):
         try:
             snapshot_download(
@@ -65,10 +71,10 @@ def snapshot_with_retries(repo_id, local_dir, allow_patterns, max_retries=5, del
                 max_workers=16,
             )
             return
-        except requests.exceptions.ReadTimeout:
+        except (requests.exceptions.ReadTimeout, HfHubHTTPError, LocalEntryNotFoundError) as e:
             if attempt == max_retries - 1:
                 raise
-            print(f"[retry] timeout, sleeping {delay}s")
+            print(f"[retry {attempt + 1}/{max_retries}] {type(e).__name__}: {str(e)[:200]}; sleeping {delay}s")
             time.sleep(delay)
 
 
@@ -83,19 +89,27 @@ def setup_terashuf(parent_dir: Path) -> Path:
     return terashuf_bin
 
 
+def raw_files(raw_dir: Path) -> list[Path]:
+    return sorted({f for pat in RAW_PATTERNS for f in raw_dir.rglob(pat) if f.is_file()})
+
+
 def shuffle_domain(domain: str, raw_dir: Path, out_dir: Path, terashuf: Path,
                    memory_gb: float, seed: int, nchunks: int, val_docs: int):
     out_dir.mkdir(parents=True, exist_ok=True)
     prefix = f"{domain}.chunk."
     suffix = ".jsonl"
-    env = f"MEMORY={memory_gb} SEED={seed}"
+    name_expr = " -o ".join(f"-name '{pat}'" for pat in RAW_PATTERNS)
     run(
-        f"ulimit -n 100000 && {env} "
-        f"find {raw_dir} -type f -name '*.jsonl.gz' -print0 | "
-        f"xargs -0 zcat | {terashuf} | "
+        "set -o pipefail && ulimit -n 100000 && "
+        f"find {raw_dir} -type f \\( {name_expr} \\) -print0 | "
+        # Decompress by extension. The trailing echo keeps files that lack a final
+        # newline (e.g. math/*.jsonl) from gluing onto the next file's first record;
+        # the resulting blank lines are dropped by grep.
+        "xargs -0 -n 1 sh -c 'case \"$0\" in *.zst) zstdcat -- \"$0\" ;; *) zcat -f -- \"$0\" ;; esac; echo' | "
+        "LC_ALL=C grep -v '^$' | "
+        f"MEMORY={memory_gb} SEED={seed} {terashuf} | "
         f"split -n r/{nchunks} -d --suffix-length=2 --additional-suffix={suffix} "
         f"- {out_dir}/{prefix}"
-        "; trap 'echo SIGPIPE; exit 1' SIGPIPE;"
     )
 
     # Pull a small validation slice off the head of each chunk.
@@ -162,9 +176,12 @@ def main():
 
     for domain in args.domains:
         raw_dir = raw_root / domain
-        if not raw_dir.exists() or not any(raw_dir.rglob("*.jsonl.gz")):
-            print(f"[skip] {domain}: no *.jsonl.gz under {raw_dir}")
-            continue
+        files = raw_files(raw_dir) if raw_dir.exists() else []
+        if not files:
+            raise RuntimeError(f"{domain}: no raw shards matching {RAW_PATTERNS} under {raw_dir}")
+        n_other = sum(1 for f in raw_dir.rglob("*") if f.is_file()) - len(files)
+        print(f"[shuffle] {domain}: {len(files)} raw shards"
+              + (f" (WARNING: {n_other} other files ignored)" if n_other else ""))
         out_dir = data_dir / f"{domain}_shuffled"
         print(f"[shuffle] {domain} → {out_dir}")
         shuffle_domain(domain, raw_dir, out_dir, terashuf,
