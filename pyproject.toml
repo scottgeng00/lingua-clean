@@ -27,9 +27,9 @@ dependencies = [
     "sentencepiece",
 
     # --- Hugging Face stack ---
-    "transformers==4.46.3",
-    "tokenizers==0.20.3",
-    "huggingface_hub==0.26.2",
+    "transformers==4.51.3",  # >=4.47 for OLMo-2, >=4.51 for Qwen3
+    "tokenizers==0.21.4",
+    "huggingface_hub==0.36.2",
     "datasets==3.1.0",
     "safetensors==0.4.5",
 

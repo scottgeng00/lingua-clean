@@ -57,7 +57,40 @@ class BaseTransformerArgs:
     max_seqlen: int = 1024
 
     qk_norm: bool = False
+    # QK-norm over each head's head_dim (Qwen3 style) instead of the full
+    # n_heads * head_dim projection (OLMo-2 style). Requires qk_norm.
+    qk_norm_per_head: bool = False
     post_norm: bool = False
+    # Bias on the q/k/v projections (Qwen2/2.5 style); o projection stays bias-free.
+    qkv_bias: bool = False
+
+    # HF model class this corresponds to (a key of HF_ARCH_SPECS, e.g.
+    # "Qwen3ForCausalLM"). Required for HF export; when set, the flags above are
+    # checked against it at build time.
+    hf_arch: Optional[str] = None
+
+
+# The architecture flags each HF export target requires.
+HF_ARCH_SPECS = {
+    "LlamaForCausalLM": dict(post_norm=False, qk_norm=False, qk_norm_per_head=False, qkv_bias=False),
+    "Olmo2ForCausalLM": dict(post_norm=True, qk_norm=True, qk_norm_per_head=False, qkv_bias=False),
+    "Qwen2ForCausalLM": dict(post_norm=False, qk_norm=False, qk_norm_per_head=False, qkv_bias=True),
+    "Qwen3ForCausalLM": dict(post_norm=False, qk_norm=True, qk_norm_per_head=True, qkv_bias=False),
+}
+
+
+def check_hf_arch(args: BaseTransformerArgs) -> None:
+    """Raise if args.hf_arch is unknown or inconsistent with the architecture flags."""
+    if args.hf_arch not in HF_ARCH_SPECS:
+        raise ValueError(f"model.hf_arch must be one of {list(HF_ARCH_SPECS)}, got {args.hf_arch!r}")
+    mismatches = {
+        flag: (getattr(args, flag), want)
+        for flag, want in HF_ARCH_SPECS[args.hf_arch].items()
+        if getattr(args, flag) != want
+    }
+    if mismatches:
+        detail = ", ".join(f"{k}={got} (needs {want})" for k, (got, want) in mismatches.items())
+        raise ValueError(f"model flags don't match hf_arch={args.hf_arch!r}: {detail}")
 
 
 def cross_entropy(pred, target, **kwargs):
@@ -325,6 +358,8 @@ class Attention(nn.Module):
         rope_theta: float,
         qk_norm: bool = False,
         norm_eps: float = 1e-5,
+        qkv_bias: bool = False,
+        qk_norm_per_head: bool = False,
     ):
         super().__init__()
 
@@ -339,17 +374,17 @@ class Attention(nn.Module):
         self.wq = nn.Linear(
             dim,
             n_heads * head_dim,
-            bias=False,
+            bias=qkv_bias,
         )
         self.wk = nn.Linear(
             dim,
             n_kv_heads * head_dim,
-            bias=False,
+            bias=qkv_bias,
         )
         self.wv = nn.Linear(
             dim,
             n_kv_heads * head_dim,
-            bias=False,
+            bias=qkv_bias,
         )
 
         self.wo = nn.Linear(
@@ -358,8 +393,13 @@ class Attention(nn.Module):
             bias=False,
         )
 
+        assert qk_norm or not qk_norm_per_head, "qk_norm_per_head requires qk_norm"
         self.qk_norm = qk_norm
-        if qk_norm:
+        self.qk_norm_per_head = qk_norm_per_head
+        if qk_norm and qk_norm_per_head:
+            self.q_norm = RMSNorm(head_dim, eps=norm_eps)
+            self.k_norm = RMSNorm(head_dim, eps=norm_eps)
+        elif qk_norm:
             self.q_norm = RMSNorm(n_heads * head_dim, eps=norm_eps)
             self.k_norm = RMSNorm(n_kv_heads * head_dim, eps=norm_eps)
 
@@ -379,7 +419,7 @@ class Attention(nn.Module):
         xk = self.wk(x.view_as(x))
         xv = self.wv(x.view_as(x))
 
-        if self.qk_norm:
+        if self.qk_norm and not self.qk_norm_per_head:
             xq = self.q_norm(xq)
             xk = self.k_norm(xk)
 
@@ -388,6 +428,10 @@ class Attention(nn.Module):
         xq = xq.view(bsz, seq_len, self.n_heads, self.head_dim)
         xk = xk.view(bsz, seq_len, self.n_kv_heads, self.head_dim)
         xv = xv.view(bsz, seq_len, self.n_kv_heads, self.head_dim)
+
+        if self.qk_norm_per_head:
+            xq = self.q_norm(xq)
+            xk = self.k_norm(xk)
 
         xq, xk = apply_rotary_emb(xq, xk, 1, freq_cis[0:seq_len])
 
@@ -477,6 +521,8 @@ class Attention(nn.Module):
                 a=-3 * init_std,
                 b=3 * init_std,
             )
+            if w.bias is not None:
+                nn.init.zeros_(w.bias)
 
         nn.init.trunc_normal_(
             self.wo.weight,
@@ -580,6 +626,8 @@ class TransformerBlock(nn.Module):
             rope_theta=args.rope_theta,
             qk_norm=args.qk_norm,
             norm_eps=args.norm_eps,
+            qkv_bias=args.qkv_bias,
+            qk_norm_per_head=args.qk_norm_per_head,
         )
         self.feed_forward = FeedForward(
             dim=args.dim,
@@ -637,6 +685,8 @@ class BaseTransformer(nn.Module):
     def __init__(self, args: BaseTransformerArgs):
         super().__init__()
         self.dim = args.dim
+        if args.hf_arch is not None:
+            check_hf_arch(args)
         self.init_base_std = args.init_base_std
         self.init_std_factor = InitStdFactor(args.init_std_factor)
         self.max_seqlen = args.max_seqlen

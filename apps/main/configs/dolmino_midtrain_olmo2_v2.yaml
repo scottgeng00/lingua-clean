@@ -35,6 +35,7 @@ model:
   weight_tying: false
   qk_norm: true
   post_norm: true
+  hf_arch: Olmo2ForCausalLM
 
 checkpoint:
   init_ckpt_path: ${oc.env:STUDENT_INIT_PATH}
