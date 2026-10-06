@@ -10,16 +10,14 @@
 #   SLURM_QOS          defaulted to `h100_comem_high` — wrong elsewhere
 #   OLMES_CONDA_ENV    only if you'll run OLMES evals (mid-train recipes do, every 1200 steps)
 
-export CACHE_DIR="${CACHE_DIR:-${HOME}/lingua-clean-sandbox}"
+# export CACHE_DIR="${CACHE_DIR:-${HOME}/lingua-clean-sandbox}"
+export CACHE_DIR="/checkpoint/dream-sc-3/scottg/pretrain/lingua-runs"
 
-# Data + checkpoints (set TEACHER_*_PATH / STUDENT_*_PATH to a shared cache to skip re-downloads).
-# Data + checkpoints. Hardcoded to jacquelinehe's prepared shared artifacts so
-# collaborators with access to /checkpoint/comem/jacquelinehe run without
-# re-downloading/preparing. Override by exporting the var before sourcing.
-export DATA_ROOT="${DATA_ROOT:-/checkpoint/comem/jacquelinehe/official_lingua/data/dolmino_splits}"
-export TEACHER_1B_PATH="${TEACHER_1B_PATH:-/checkpoint/comem/jacquelinehe/lingua/pretrained_hf_ckpts/OLMo-2-0425-1B-Instruct}"
-export TEACHER_7B_PATH="${TEACHER_7B_PATH:-/checkpoint/comem/jacquelinehe/lingua/pretrained_hf_ckpts/OLMo-2-1124-7B-Instruct}"
-export STUDENT_INIT_PATH="${STUDENT_INIT_PATH:-/checkpoint/comem/jacquelinehe/lingua/pretrained_hf_ckpts/OLMo-2-0425-1B-stage1-4001B}"  # Lingua DCP root
+# Data + checkpoints, all under /home/sgeng/scottg/pretrain/assets. Override by exporting the var before sourcing.
+export DATA_ROOT="${DATA_ROOT:-/home/sgeng/scottg/pretrain/assets/data/dolmino_splits}"
+export TEACHER_1B_PATH="${TEACHER_1B_PATH:-/home/sgeng/scottg/pretrain/assets/models/OLMo-2-0425-1B-Instruct}"
+export TEACHER_7B_PATH="${TEACHER_7B_PATH:-/home/sgeng/scottg/pretrain/assets/models/OLMo-2-1124-7B-Instruct}"
+export STUDENT_INIT_PATH="${STUDENT_INIT_PATH:-/home/sgeng/scottg/pretrain/assets/models/OLMo-2-0425-1B-stage1-4001B}"  # Lingua DCP root
 export STUDENT_HF_PATH="${STUDENT_HF_PATH:-${STUDENT_INIT_PATH}/hf}"                                # HF mirror
 export TOKENIZER_PATH="${TOKENIZER_PATH:-${STUDENT_HF_PATH}}"
 
@@ -32,11 +30,11 @@ export SLURM_LOG_DIR="${SLURM_LOG_DIR:-${CACHE_DIR}/runs/slurm_logs}"
 # OLMES env is separate because it pins different vLLM/transformers versions;
 # it may be either a venv or a conda env.
 export LINGUA_VENV="${LINGUA_VENV:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.venv}"
-export OLMES_CONDA_ENV="${OLMES_CONDA_ENV:-/checkpoint/comem/jacquelinehe/miniconda3/envs/olmes}"
+export OLMES_CONDA_ENV="${OLMES_CONDA_ENV:-/home/sgeng/scottg/pretrain/olmes/.venv}"
 
 # SLURM. Leave a value empty to omit the flag and use the site default.
-export SLURM_ACCOUNT="${SLURM_ACCOUNT:-comem}"
-export SLURM_QOS="${SLURM_QOS:-h100_comem_high}"
+export SLURM_ACCOUNT="${SLURM_ACCOUNT:-dream}"
+export SLURM_QOS="${SLURM_QOS:-h200_dream_high}"
 
 # Wandb. Empty → user's default entity.
 export WANDB_ENTITY="${WANDB_ENTITY:-}"

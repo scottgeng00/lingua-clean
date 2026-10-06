@@ -3,7 +3,7 @@
 Some helpful scripts for (1) uv environment setup, (2) model downloading and conversion, (3) mid-training/pre-training, (4) trained model checkpoint conversion and test some sample generations.
 
 ```bash
-cd /checkpoint/comem/jacquelinehe/lingua-clean
+cd /home/sgeng/scottg/pretrain/lingua-clean
 source scripts/env.sh   # required in every fresh shell; SET YOUR ENV VARIABLES HERE.
 ```
 
