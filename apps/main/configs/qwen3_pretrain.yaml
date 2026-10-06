@@ -4,14 +4,16 @@
 #
 # Matches Qwen3-0.6B (hf config.json): dim 1024, 28 layers, 16 q / 8 kv heads,
 # head_dim 128 (decoupled from dim), SwiGLU 3072, RMSNorm eps 1e-6, pre-norm,
-# no biases, per-head QK-norm, RoPE theta 1e6, tied embeddings, 0.02 init.
-# ~0.54B params total (0.44B non-embedding, same as Qwen3-0.6B).
+# no biases, per-head QK-norm, RoPE theta 1e6, tied embeddings, 0.02 init,
+# Qwen3 tokenizer. ~0.60B params total (0.44B non-embedding), as Qwen3-0.6B.
 #
 # Known deviations from real Qwen3 (need code changes to close):
 #   - Embedding init uses dim**-0.5 (~0.031) rather than 0.02; init_base_std
 #     only reaches the transformer blocks.
-#   - Tokenizer is OLMo-2's (~100k vocab, $TOKENIZER_PATH) like every other
-#     config here, rather than Qwen3's 151k vocab.
+#   - Vocab is len(tokenizer) = 151669 rather than Qwen's padded 151936.
+#
+# Tokenizer: Qwen/Qwen3-0.6B-Base (eos = <|endoftext|>, no BOS) at the path
+# under data.tokenizer.path below.
 #
 # Budget at the defaults (2 nodes = 16 GPUs):
 #   8 seq/GPU x 4096 tok x 16 GPU x 2 grad_acc = ~1.05M tokens/step
@@ -76,8 +78,8 @@ data:
   seq_len: 4096
   n_views: 2
   load_async: true
-  add_bos: true
-  add_eos: true
+  add_bos: false              # Qwen tokenizer has no BOS token
+  add_eos: true               # <|endoftext|> between documents
   disable_cross_doc_attn: true
   sources:
     dclm_shuffled: 0.472
@@ -88,7 +90,7 @@ data:
     stackexchange_shuffled: 0.0245
   tokenizer:
     name: hf
-    path: ${oc.env:TOKENIZER_PATH}
+    path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base
 
 profiling:
   run: false
