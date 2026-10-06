@@ -1,0 +1,116 @@
+# From-scratch pretraining of a Qwen3-0.6B-shaped model on the Dolmino mix
+# (same sources / weights as dolmino_pretrain.yaml), using only existing
+# lingua knobs.
+#
+# Matches Qwen3-0.6B (hf config.json): dim 1024, 28 layers, 16 q / 8 kv heads,
+# head_dim 128 (decoupled from dim), SwiGLU 3072, RMSNorm eps 1e-6, pre-norm,
+# no biases, per-head QK-norm, RoPE theta 1e6, tied embeddings, 0.02 init.
+# ~0.54B params total (0.44B non-embedding, same as Qwen3-0.6B).
+#
+# Known deviations from real Qwen3 (need code changes to close):
+#   - Embedding init uses dim**-0.5 (~0.031) rather than 0.02; init_base_std
+#     only reaches the transformer blocks.
+#   - Tokenizer is OLMo-2's (~100k vocab, $TOKENIZER_PATH) like every other
+#     config here, rather than Qwen3's 151k vocab.
+#
+# Budget at the defaults (2 nodes = 16 GPUs):
+#   8 seq/GPU x 4096 tok x 16 GPU x 2 grad_acc = ~1.05M tokens/step
+#   20000 steps = ~21B tokens (~35 tokens/param).
+name: qwen3-0p6b-dolmino
+dump_dir: ${oc.env:MIDTRAIN_ROOT}/qwen3_pretrain
+steps: 20000
+probe_freq: null
+seed: 777
+grad_acc_steps: 2
+
+optim:
+  lr: 3e-3
+  weight_decay: 0.033
+  warmup: 2000
+  lr_min_ratio: 0.01
+  clip: 1.0
+  beta1: 0.9
+  beta2: 0.95
+  scheduler: cosine
+
+distributed:
+  fsdp_type: full_shard
+  compile: true
+  model_dtype: bf16
+  matmul_allow_tf32: true
+  selective_activation_checkpointing: false
+  tp_size: 1
+
+# Qwen3-0.6B shape.
+model:
+  dim: 1024
+  n_layers: 28
+  n_heads: 16
+  n_kv_heads: 8
+  head_dim: 128
+  ffn_dim_multiplier: 1.125   # round_up(1.125 * int(8*1024/3), 256) = 3072
+  multiple_of: 256
+  norm_eps: 1e-6
+  rope_theta: 1000000
+  max_seqlen: 4096
+  weight_tying: true
+  qk_norm: true
+  qk_norm_per_head: true
+  post_norm: false
+  hf_arch: Qwen3ForCausalLM
+  init_base_std: 0.02
+
+checkpoint:
+  init_ckpt_path: null
+  dump:
+    every: 1000
+    keep: -1
+  eval:
+    every: 1000
+    keep: -1
+
+data:
+  root_dir: ${oc.env:DATA_ROOT}
+  batch_size: 8
+  prefetch_size: 64
+  seq_len: 4096
+  n_views: 2
+  load_async: true
+  add_bos: true
+  add_eos: true
+  disable_cross_doc_attn: true
+  sources:
+    dclm_shuffled: 0.472
+    math_shuffled: 0.208
+    flan_shuffled: 0.166
+    wiki_shuffled: 0.0711
+    pes2o_shuffled: 0.0585
+    stackexchange_shuffled: 0.0245
+  tokenizer:
+    name: hf
+    path: ${oc.env:TOKENIZER_PATH}
+
+profiling:
+  run: false
+
+logging:
+  freq: 10
+  wandb:
+    project: "lingua-clean-pretrain"
+    entity: ${oc.env:WANDB_ENTITY,null}
+    resume: allow
+
+# Async eval = held-out perplexity on each Dolmino source only (<source>/*.val.jsonl). Downstream
+# harness tasks are skipped: a 0.6B model this early scores ~chance on them.
+async_eval_gpus: 1
+eval:
+  dump_dir: ${oc.env:EVAL_ROOT}/slurm_eval_logs
+  generator:
+    max_tokens: 4096
+    dtype: bf16
+  harness: null
+  validation:
+    max_steps: 1000
+    use_val_from_train_src: true
+    root_dir: ${oc.env:DATA_ROOT}
+    sources: []
