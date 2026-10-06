@@ -20,7 +20,7 @@ import tempfile
 import shutil
 
 import torch
-from transformers import AutoTokenizer, GenerationConfig, LlamaConfig, LlamaForCausalLM, Olmo2Config, Olmo2ForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig, LlamaConfig, Olmo2Config, Qwen2Config, Qwen3Config
 
 from apps.main.transformer import LMTransformer, LMTransformerArgs
 from pathlib import Path
@@ -32,6 +32,7 @@ from omegaconf import OmegaConf
 from apps.main.transformer import LMTransformer, LMTransformerArgs
 from lingua.args import dataclass_from_dict
 from lingua.checkpoint import CONSOLIDATE_NAME
+from lingua.transformer import HF_ARCH_SPECS, check_hf_arch
 
 from rich import print
 from rich.console import Console
@@ -103,7 +104,7 @@ def load_consolidated_model(
     #     # Init rope embeddings with RoPE scaling config
     #     model.rope_embeddings.reset_parameters()
 
-    model = model.cuda().eval()
+    model = model.to("cuda" if torch.cuda.is_available() else "cpu").eval()
     for param in model.parameters():
         param.data = param.data.to(dtype=dtype)
 
@@ -120,12 +121,28 @@ def write_json(text, path):
         json.dump(text, f)
 
 
+def resolve_hf_arch(params, hf_arch_override=None):
+    """Return the checkpoint's model.hf_arch (or the override), checked against its flags."""
+    arch = hf_arch_override or params.get("hf_arch")
+    if arch is None:
+        raise ValueError(
+            "Checkpoint has no model.hf_arch. Set it in the training config, or pass "
+            "--hf_arch <HF class, e.g. Olmo2ForCausalLM> for checkpoints trained before it existed."
+        )
+    if params.get("hf_arch") and hf_arch_override and hf_arch_override != params["hf_arch"]:
+        raise ValueError(f"--hf_arch={hf_arch_override} contradicts the checkpoint's hf_arch={params['hf_arch']}")
+    model_args = dataclass_from_dict(LMTransformerArgs, {**params, "hf_arch": arch}, strict=False)
+    check_hf_arch(model_args)
+    return arch
+
+
 def write_model(
     model_path,
     input_base_path,
     tokenizer_path,
     safe_serialization=True,
     push_to_hub=False,
+    hf_arch_override=None,
 ):
     print("Converting the model.")
     params = read_json(os.path.join(input_base_path, "params.json"))
@@ -133,7 +150,7 @@ def write_model(
     n_layers = params["n_layers"]
     n_heads = params["n_heads"]
     dim = params["dim"]
-    dims_per_head = dim // n_heads
+    dims_per_head = params.get("head_dim") or dim // n_heads
     base = params["rope_theta"]
     assert base is not None, "Rope theta is not set"
     inv_freq = 1.0 / (base ** (torch.arange(0, dims_per_head, 2).float() / dims_per_head))
@@ -141,8 +158,9 @@ def write_model(
     max_position_embeddings = params['max_seqlen']
     assert max_position_embeddings is not None, "Max position embeddings is not set"
 
-    # Detect if this is an OLMo-2 model based on tokenizer path
-    is_olmo2 = "olmo" in tokenizer_path.lower()
+    arch = resolve_hf_arch(params, hf_arch_override)
+    is_olmo2 = arch == "Olmo2ForCausalLM"
+    print(f"Target HF architecture: {arch}")
 
     # For now, don't support rope_scaling (if we need this, @nband's script supports)
    #  assert params['rope_scaling'] is None, "Rope scaling is not supported yet"
@@ -159,7 +177,7 @@ def write_model(
         return w.view(n_heads, dim1 // n_heads // 2, 2, dim2).transpose(1, 2).reshape(dim1, dim2)
 
     def permute_norm(w, n_heads):
-        """Permute 1D QK-norm weights from Lingua interleaved order to HF split-half."""
+        """Permute 1D QK-norm weights (or q/k biases) from Lingua interleaved order to HF split-half."""
         head_dim = w.shape[0] // n_heads
         return w.view(n_heads, head_dim // 2, 2).transpose(1, 2).reshape(-1)
 
@@ -185,7 +203,7 @@ def write_model(
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
         bos_token_id = tokenizer.bos_token_id
         eos_token_id = tokenizer.eos_token_id
-        assert bos_token_id is not None, "Bos token id is not set"
+        # bos may legitimately be None (e.g. Qwen tokenizers)
         assert eos_token_id is not None, "Eos token id is not set"
         tokenizer_vocab_size = len(tokenizer)
         model_vocab_size = loaded['output.weight'].shape[0]
@@ -220,7 +238,7 @@ def write_model(
                 # OLMo-2 uses post_attention_layernorm and post_feedforward_layernorm
                 state_dict = {
                     f"model.layers.{layer_i}.self_attn.q_proj.weight": permute(
-                        loaded[f"layers.{layer_i}.attention.wq.weight"], n_heads=n_heads
+                        loaded[f"layers.{layer_i}.attention.wq.weight"], n_heads=n_heads, dim1=n_heads * dims_per_head
                     ),
                     f"model.layers.{layer_i}.self_attn.k_proj.weight": permute(
                         loaded[f"layers.{layer_i}.attention.wk.weight"],
@@ -248,11 +266,72 @@ def write_model(
                     state_dict[f"model.layers.{layer_i}.self_attn.k_norm.weight"] = permute_norm(
                         loaded[f"layers.{layer_i}.attention.k_norm.weight"], n_heads=num_key_value_heads
                     )
+            elif arch == "Qwen2ForCausalLM":
+                # Qwen2 = Llama layout + q/k/v biases. q/k biases follow their rows'
+                # RoPE permutation; v bias is unpermuted.
+                state_dict = {
+                    f"model.layers.{layer_i}.self_attn.q_proj.weight": permute(
+                        loaded[f"layers.{layer_i}.attention.wq.weight"], n_heads=n_heads, dim1=n_heads * dims_per_head
+                    ),
+                    f"model.layers.{layer_i}.self_attn.q_proj.bias": permute_norm(
+                        loaded[f"layers.{layer_i}.attention.wq.bias"], n_heads=n_heads
+                    ),
+                    f"model.layers.{layer_i}.self_attn.k_proj.weight": permute(
+                        loaded[f"layers.{layer_i}.attention.wk.weight"],
+                        n_heads=num_key_value_heads,
+                        dim1=key_value_dim,
+                    ),
+                    f"model.layers.{layer_i}.self_attn.k_proj.bias": permute_norm(
+                        loaded[f"layers.{layer_i}.attention.wk.bias"], n_heads=num_key_value_heads
+                    ),
+                    f"model.layers.{layer_i}.self_attn.v_proj.weight": loaded[f"layers.{layer_i}.attention.wv.weight"],
+                    f"model.layers.{layer_i}.self_attn.v_proj.bias": loaded[f"layers.{layer_i}.attention.wv.bias"],
+                    f"model.layers.{layer_i}.self_attn.o_proj.weight": loaded[f"layers.{layer_i}.attention.wo.weight"],
+                    f"model.layers.{layer_i}.mlp.gate_proj.weight": loaded[f"layers.{layer_i}.feed_forward.w1.weight"],
+                    f"model.layers.{layer_i}.mlp.down_proj.weight": loaded[f"layers.{layer_i}.feed_forward.w2.weight"],
+                    f"model.layers.{layer_i}.mlp.up_proj.weight": loaded[f"layers.{layer_i}.feed_forward.w3.weight"],
+                    f"model.layers.{layer_i}.input_layernorm.weight": loaded[
+                        f"layers.{layer_i}.attention_norm.weight"
+                    ],
+                    f"model.layers.{layer_i}.post_attention_layernorm.weight": loaded[
+                        f"layers.{layer_i}.ffn_norm.weight"
+                    ],
+                }
+            elif arch == "Qwen3ForCausalLM":
+                # Qwen3 = Llama layout + per-head q/k RMSNorm (weights of size head_dim,
+                # permuted like a single head).
+                state_dict = {
+                    f"model.layers.{layer_i}.self_attn.q_proj.weight": permute(
+                        loaded[f"layers.{layer_i}.attention.wq.weight"], n_heads=n_heads, dim1=n_heads * dims_per_head
+                    ),
+                    f"model.layers.{layer_i}.self_attn.k_proj.weight": permute(
+                        loaded[f"layers.{layer_i}.attention.wk.weight"],
+                        n_heads=num_key_value_heads,
+                        dim1=key_value_dim,
+                    ),
+                    f"model.layers.{layer_i}.self_attn.v_proj.weight": loaded[f"layers.{layer_i}.attention.wv.weight"],
+                    f"model.layers.{layer_i}.self_attn.o_proj.weight": loaded[f"layers.{layer_i}.attention.wo.weight"],
+                    f"model.layers.{layer_i}.self_attn.q_norm.weight": permute_norm(
+                        loaded[f"layers.{layer_i}.attention.q_norm.weight"], n_heads=1
+                    ),
+                    f"model.layers.{layer_i}.self_attn.k_norm.weight": permute_norm(
+                        loaded[f"layers.{layer_i}.attention.k_norm.weight"], n_heads=1
+                    ),
+                    f"model.layers.{layer_i}.mlp.gate_proj.weight": loaded[f"layers.{layer_i}.feed_forward.w1.weight"],
+                    f"model.layers.{layer_i}.mlp.down_proj.weight": loaded[f"layers.{layer_i}.feed_forward.w2.weight"],
+                    f"model.layers.{layer_i}.mlp.up_proj.weight": loaded[f"layers.{layer_i}.feed_forward.w3.weight"],
+                    f"model.layers.{layer_i}.input_layernorm.weight": loaded[
+                        f"layers.{layer_i}.attention_norm.weight"
+                    ],
+                    f"model.layers.{layer_i}.post_attention_layernorm.weight": loaded[
+                        f"layers.{layer_i}.ffn_norm.weight"
+                    ],
+                }
             else:
                 # Llama uses input_layernorm and post_attention_layernorm
                 state_dict = {
                     f"model.layers.{layer_i}.self_attn.q_proj.weight": permute(
-                        loaded[f"layers.{layer_i}.attention.wq.weight"], n_heads=n_heads
+                        loaded[f"layers.{layer_i}.attention.wq.weight"], n_heads=n_heads, dim1=n_heads * dims_per_head
                     ),
                     f"model.layers.{layer_i}.self_attn.k_proj.weight": permute(
                         loaded[f"layers.{layer_i}.attention.wk.weight"],
@@ -282,11 +361,13 @@ def write_model(
         filename = f"pytorch_model-{n_layers + 1}-of-{n_layers + 1}.bin"
 
         # Unsharded
+        tie_word_embeddings = bool(params.get("weight_tying", False))
         state_dict = {
             "model.embed_tokens.weight": loaded["tok_embeddings.weight"],
             "model.norm.weight": loaded["norm.weight"],
-            "lm_head.weight": loaded["output.weight"],
         }
+        if not tie_word_embeddings:
+            state_dict["lm_head.weight"] = loaded["output.weight"]
 
         for k, v in state_dict.items():
             index_dict["weight_map"][k] = filename
@@ -321,7 +402,43 @@ def write_model(
                 max_position_embeddings=max_position_embeddings,
                 bos_token_id=bos_token_id,
                 eos_token_id=eos_token_id,
-                tie_word_embeddings=False
+                tie_word_embeddings=tie_word_embeddings,
+            )
+        elif arch == "Qwen2ForCausalLM":
+            config = Qwen2Config(
+                hidden_size=dim,
+                intermediate_size=intermediate_size,
+                num_attention_heads=params["n_heads"],
+                num_hidden_layers=params["n_layers"],
+                rms_norm_eps=params["norm_eps"],
+                num_key_value_heads=num_key_value_heads,
+                vocab_size=vocab_size,
+                rope_theta=base,
+                max_position_embeddings=max_position_embeddings,
+                use_sliding_window=False,
+                sliding_window=None,
+                bos_token_id=bos_token_id,
+                eos_token_id=eos_token_id,
+                tie_word_embeddings=tie_word_embeddings,
+            )
+        elif arch == "Qwen3ForCausalLM":
+            config = Qwen3Config(
+                hidden_size=dim,
+                intermediate_size=intermediate_size,
+                num_attention_heads=params["n_heads"],
+                num_hidden_layers=params["n_layers"],
+                head_dim=dims_per_head,
+                rms_norm_eps=params["norm_eps"],
+                num_key_value_heads=num_key_value_heads,
+                vocab_size=vocab_size,
+                rope_theta=base,
+                max_position_embeddings=max_position_embeddings,
+                attention_bias=False,
+                use_sliding_window=False,
+                sliding_window=None,
+                bos_token_id=bos_token_id,
+                eos_token_id=eos_token_id,
+                tie_word_embeddings=tie_word_embeddings,
             )
         else:
             config = LlamaConfig(
@@ -337,7 +454,8 @@ def write_model(
                 max_position_embeddings=max_position_embeddings,
                 bos_token_id=bos_token_id,
                 eos_token_id=eos_token_id,
-                tie_word_embeddings=False
+                tie_word_embeddings=tie_word_embeddings,
+                head_dim=dims_per_head,
             )
 
         config.save_pretrained(tmp_model_path)
@@ -356,12 +474,8 @@ def write_model(
         del loaded
         gc.collect()
 
-        if is_olmo2:
-            print("Loading the checkpoint in an OLMo-2 model.")
-            model = Olmo2ForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
-        else:
-            print("Loading the checkpoint in a Llama model.")
-            model = LlamaForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
+        print(f"Loading the checkpoint in a {type(config).__name__} model.")
+        model = AutoModelForCausalLM.from_pretrained(tmp_model_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True)
 
         # Avoid saving this as part of the config.
         del model.config._name_or_path
@@ -415,6 +529,10 @@ def main():
     parser.add_argument(
         '--save_tokenizer', action='store_true', default=False, help='Whether or not to save the tokenizer.'
     )
+    parser.add_argument(
+        "--hf_arch", choices=list(HF_ARCH_SPECS), default=None,
+        help="Only for checkpoints whose params.json predates model.hf_arch.",
+    )
     args = parser.parse_args()
 
     write_model(
@@ -423,6 +541,7 @@ def main():
         tokenizer_path=args.tokenizer_path,
         safe_serialization=args.safe_serialization,
         push_to_hub=args.push_to_hub,
+        hf_arch_override=args.hf_arch,
     )
 
     if args.save_tokenizer:
@@ -433,22 +552,12 @@ def main():
         # Try loading and generating
         console = Console()
 
-        # Detect if this is an OLMo-2 model
-        is_olmo2 = "olmo" in args.tokenizer_path.lower()
-
         # Load model + tokenizer
-        if is_olmo2:
-            model = Olmo2ForCausalLM.from_pretrained(
-                args.output_dir,
-                torch_dtype=torch.bfloat16,
-                low_cpu_mem_usage=True
-            ).to("cuda")
-        else:
-            model = LlamaForCausalLM.from_pretrained(
-                args.output_dir,
-                torch_dtype=torch.bfloat16,
-                low_cpu_mem_usage=True
-            ).to("cuda")
+        model = AutoModelForCausalLM.from_pretrained(
+            args.output_dir,
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True
+        ).to("cuda")
         tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path)
         tokenizer.pad_token = tokenizer.eos_token
 

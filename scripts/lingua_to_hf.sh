@@ -52,7 +52,8 @@ echo "[lingua→hf] Stage 2: consolidated → HF at ${OUT_DIR}"
 python setup/convert_consolidated_lingua_ckpt_to_hf.py \
     --input_dir "${CONSOLIDATED_DIR}" \
     --tokenizer_path "${TOKENIZER_PATH}" \
-    --output_dir "${OUT_DIR}"
+    --output_dir "${OUT_DIR}" \
+    ${HF_ARCH:+--hf_arch "${HF_ARCH}"}
 
 popd >/dev/null
 
