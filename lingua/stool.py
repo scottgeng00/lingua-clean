@@ -26,7 +26,7 @@ class StoolArgs:
     ngpu: int = 8  # The number of GPUs required per node.
     ncpu: int = 16  # The number of CPUs allocated per GPU.
     mem: str = ""  # The amount of memory to allocate.
-    anaconda: str = "default"  # The path to the anaconda environment.
+    anaconda: str = "default"  # The path to the python venv (or "default" = current `python`).
     constraint: str = ""  # The constraint on the nodes.
     exclude: str = ""  # The nodes to exclude.
     time: int = -1  # The time limit of the job (in minutes).
@@ -63,9 +63,7 @@ SBATCH_COMMAND = """#!/bin/bash
 unset MASTER_ADDR MASTER_PORT RANK WORLD_SIZE LOCAL_RANK LOCAL_WORLD_SIZE
 unset TORCHELASTIC_RUN_ID DORA_FORCE_DISTRIB
 
-# Mimic the effect of "conda init", which doesn't work for scripts
-eval "$({conda_exe} shell.bash hook)"
-source activate {conda_env_path}
+source {env_path}/bin/activate
 
 {go_to_code_dir}
 
@@ -191,8 +189,7 @@ def launch_job(args: StoolArgs):
     with open(f"{dump_dir}/base_config.yaml", "w") as cfg:
         cfg.write(OmegaConf.to_yaml(args.config))
 
-    conda_exe = os.environ.get("CONDA_EXE", "conda")
-    conda_env_path = os.path.dirname(os.path.dirname(args.anaconda))
+    env_path = os.path.dirname(os.path.dirname(args.anaconda))
     log_output = (
         "-o $DUMP_DIR/logs/%j/%j_%t.out -e $DUMP_DIR/logs/%j/%j_%t.err"
         if not args.stdout
@@ -214,8 +211,7 @@ def launch_job(args: StoolArgs):
         exclude=args.exclude,
         time=args.time,
         partition=args.partition,
-        conda_exe=conda_exe,
-        conda_env_path=conda_env_path,
+        env_path=env_path,
         log_output=log_output,
         go_to_code_dir=f"cd {dump_dir}/code/" if args.copy_code else f"cd {os.getcwd()}",
     )

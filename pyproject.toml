@@ -1,0 +1,72 @@
+# lingua-clean dependencies, managed with uv. `bash bin/install_requirements.sh`
+# (or just `uv sync`) builds ./.venv from this file + uv.lock.
+#
+# torch / xformers come from the PyTorch cu121 index and flash-attn from its
+# prebuilt GitHub wheel (cu12 / torch 2.5 / cp311 / pre-cxx11 ABI), so nothing
+# is compiled from source.
+[project]
+name = "lingua-clean"
+version = "0.1.0"
+requires-python = "==3.11.*"
+dependencies = [
+    # --- CUDA stack ---
+    "torch==2.5.0",
+    "xformers==0.0.28.post2",
+    "flash-attn==2.7.4.post1",
+
+    # --- Core ML / config / IO ---
+    "numpy",
+    "scipy",
+    "omegaconf",
+    "msgspec",
+    "orjson",
+    "fsspec",
+    "blobfile",
+    "pynvml",
+    "tiktoken",
+    "sentencepiece",
+
+    # --- Hugging Face stack ---
+    "transformers==4.46.3",
+    "tokenizers==0.20.3",
+    "huggingface_hub==0.26.2",
+    "datasets==3.1.0",
+    "safetensors==0.4.5",
+
+    # --- Eval / metrics ---
+    "rouge-score",
+    "sacrebleu",
+    "lm-eval",
+
+    # --- Experiment tracking / profiling ---
+    "wandb",
+    "viztracer",
+
+    # --- Streaming dataset tooling (used by setup/download_prepare_hf_data.py) ---
+    "datatrove",
+
+    # --- Analysis & plotting (analysis/idx139/*.py) ---
+    "pandas",
+    "matplotlib",
+
+    # --- General CLI / IO niceties ---
+    "tqdm",
+    "requests",
+    "rich",
+]
+
+[tool.uv]
+# Not an installable package; uv only manages the environment.
+package = false
+# The flash-attn wheel and cu121 torch are linux/x86_64-only.
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+xformers = { index = "pytorch-cu121" }
+flash-attn = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.5cxx11abiFALSE-cp311-cp311-linux_x86_64.whl" }

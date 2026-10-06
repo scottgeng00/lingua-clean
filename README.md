@@ -38,9 +38,10 @@ canonical config (OLMo-2-0425-1B student, dolmino-splits dataset, 28800 steps,
 lingua-clean/
 ├── README.md                                  ← this file
 ├── LICENSE                                    ← upstream Llama-2 license
-├── requirements.txt                           ← plain-pip deps (no torch/xformers/flash-attn — see bin/)
+├── pyproject.toml, uv.lock                    ← uv-managed deps (torch/xformers cu121, prebuilt flash-attn wheel)
+├── requirements.txt                           ← plain-pip deps (no torch/xformers/flash-attn)
 ├── bin/
-│   └── install_requirements.sh                ← env bootstrap (pip + cu121 wheels)
+│   └── install_requirements.sh                ← env bootstrap (`uv sync` → ./.venv)
 ├── lingua/                                    ← lingua library (unchanged)
 │   └── (args, data, distributed, optim, ...)
 ├── apps/main/
@@ -67,16 +68,18 @@ lingua-clean/
 
 ## Setup
 
-1. Activate the existing `lingua` conda env (the one the original repo uses).
-   No separate env bootstrap needed:
+1. Build the venv with [uv](https://docs.astral.sh/uv/) (one-time; re-run after
+   dependency changes):
    ```bash
-   conda activate lingua
+   bash bin/install_requirements.sh
+   source .venv/bin/activate
    ```
-   If you don't have it yet, `bash bin/install_requirements.sh` (after a
-   fresh `conda create -n lingua python=3.11 -y && conda activate lingua`)
-   installs everything — pip deps from `requirements.txt`, then `torch==2.5.0`
-   + `xformers==0.0.28.post2` (cu121) + `flash-attn==2.7.4.post1`. Override
-   `LINGUA_CONDA_ENV=<name>` if your env has a different name.
+   This runs `uv sync --frozen` against `pyproject.toml` / `uv.lock` — Python
+   3.11, `torch==2.5.0` + `xformers==0.0.28.post2` (cu121), the prebuilt
+   `flash-attn==2.7.4.post1` wheel, and everything else pinned in the lock.
+   Override `LINGUA_VENV=<path>` to put the venv somewhere other than
+   `<repo>/.venv`. To add a dependency: `uv add <pkg>`, then commit
+   `pyproject.toml` + `uv.lock`.
 
 2. Edit `scripts/env.sh` (or export the variables in your shell beforehand)
    so the paths point at where you've actually downloaded the data and

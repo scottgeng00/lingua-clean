@@ -4,7 +4,7 @@
 #
 # Source scripts/env.sh first (sets LINGUA_CLEAN_ROOT, SLURM_LOG_DIR,
 # ANALYSIS_OUT_DIR, TEACHER_*_PATH, STUDENT_HF_PATH, DATA_ROOT,
-# CONDA_PROFILE_SH, LINGUA_CONDA_ENV).
+# LINGUA_VENV).
 #
 #
 # This file does not set --account / --qos / --partition; site defaults
@@ -25,8 +25,7 @@ set -e
 : "${LINGUA_CLEAN_ROOT:?source scripts/env.sh first}"
 source "${LINGUA_CLEAN_ROOT}/scripts/env.sh"
 
-eval "$(conda shell.bash hook)"
-conda activate "${LINGUA_CONDA_ENV}"
+source "${LINGUA_VENV}/bin/activate"
 
 export CUDA_VISIBLE_DEVICES=0
 export TOKENIZERS_PARALLELISM=false

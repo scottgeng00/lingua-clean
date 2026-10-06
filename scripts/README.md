@@ -10,7 +10,7 @@ Launch scripts for `lingua-clean`. The public entry point is
   `../apps/main/configs/recipes/<name>.yaml`, and submits a 4-node H200 sbatch
   job. Supports `DRY_RUN=1` to print the sbatch command without submitting.
 - `_sbatch_inner.sh` — the script that actually runs inside the sbatch
-  allocation. Activates the `lingua` conda env, sets the standard wandb /
+  allocation. Activates the uv venv (`$LINGUA_VENV`), sets the standard wandb /
   CUDA env, derives `NPROC_PER_NODE` / `MASTER_ADDR` / `MASTER_PORT` /
   `NODE_RANK` from SLURM, and `torchrun`s `apps.main.train` with the chosen
   recipe YAML.

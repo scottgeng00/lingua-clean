@@ -7534,14 +7534,7 @@ def train(args: TrainArgs):
                                 qos=os.environ.get("SLURM_QOS", "h200_dev"),
                                 override=False,
                                 dirs_exists_ok=True,
-                                anaconda=os.environ.get(
-                                    "LINGUA_CONDA_ENV_PATH",
-                                    os.path.join(
-                                        os.environ.get("HOME", ""),
-                                        "miniconda3", "envs",
-                                        os.environ.get("LINGUA_CONDA_ENV", "lingua"),
-                                    ),
-                                ),
+                                anaconda=os.environ.get("LINGUA_VENV", "default"),
                             )
                         )
 

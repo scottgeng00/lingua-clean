@@ -1,6 +1,6 @@
 # lingua-clean — quickstart
 
-Some helpful scripts for (1) conda environment setup, (2) model downloading and conversion, (3) mid-training/pre-training, (4) trained model checkpoint conversion and test some sample generations.
+Some helpful scripts for (1) uv environment setup, (2) model downloading and conversion, (3) mid-training/pre-training, (4) trained model checkpoint conversion and test some sample generations.
 
 ```bash
 cd /checkpoint/comem/jacquelinehe/lingua-clean
@@ -11,11 +11,11 @@ source scripts/env.sh   # required in every fresh shell; SET YOUR ENV VARIABLES 
 (`<domain>_shuffled/<domain>.chunk.*.jsonl` per `dclm`, `flan`, `math`,
 `pes2o`, `stackexchange`, `wiki`).
 
-## 1. Install the conda env (ONE-TIME ONLY)
+## 1. Install the uv venv (ONE-TIME ONLY)
 
 ```bash
-bash bin/install_requirements.sh   # creates `lingua-clean` env if missing, then installs pip deps + torch/xformers cu121 + flash-attn
-conda activate lingua-clean
+bash bin/install_requirements.sh   # `uv sync --frozen` → ./.venv (torch/xformers cu121 + prebuilt flash-attn + pinned deps)
+source .venv/bin/activate
 ```
 
 ## 2. Fetch teachers + student, convert student to Lingua DCP (Knowledge distillation only!)
@@ -63,7 +63,7 @@ CONFIG=dolmino_pretrain bash scripts/launch_pretrain.sh   # 2-node, 9600 steps, 
 
 ### Auto-evals
 
-KD recipes are configured to launch OLMES evaluation every 1200 steps. This requires a separate conda env with the OLMES package installed — point `OLMES_CONDA_ENV` (in `scripts/env.sh`) at it. To disable, remove `eval_backend: olmes` from the recipe YAML (or switch it to `harness` to use lm-eval-harness instead, matching the `dolmino_pretrain` config).
+KD recipes are configured to launch OLMES evaluation every 1200 steps. This requires a separate env (venv or conda) with the OLMES package installed — point `OLMES_CONDA_ENV` (in `scripts/env.sh`) at it. To disable, remove `eval_backend: olmes` from the recipe YAML (or switch it to `harness` to use lm-eval-harness instead, matching the `dolmino_pretrain` config).
 
 ## 4. Convert back to HF + sample generations
 

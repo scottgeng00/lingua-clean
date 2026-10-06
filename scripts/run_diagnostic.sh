@@ -99,7 +99,7 @@ if [ "$RUN_PLOTS" -eq 1 ]; then
             --dependency="$DEP"
             --wrap "set -e; cd '${ROOT_DIR}'; \
                 source scripts/env.sh; \
-                source \"\$(conda info --base)/etc/profile.d/conda.sh\"; conda activate \"\${LINGUA_CONDA_ENV}\"; \
+                source \"\${LINGUA_VENV}/bin/activate\"; \
                 python analysis/idx139/plot_entropy_histogram.py; \
                 python analysis/idx139/visualize_gate.py")
         "${PLOT_CMD[@]}"

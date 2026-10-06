@@ -242,8 +242,12 @@ def run_olmes(hf_path: str, olmes_args: OlmesArgs, output_dir: str) -> Optional[
 
     # Belt-and-suspenders: also unset in bash in case conda activate re-introduces anything
     cmd = f"""set -e
-eval "$({conda_exe} shell.bash hook)"
-conda activate {olmes_env}
+if [ -f {olmes_env}/pyvenv.cfg ]; then
+    source {olmes_env}/bin/activate
+else
+    eval "$({conda_exe} shell.bash hook)"
+    conda activate {olmes_env}
+fi
 
 # Nuke every distributed / SLURM / MPI / PMIX / torchelastic var
 unset MASTER_ADDR MASTER_PORT RANK WORLD_SIZE LOCAL_RANK LOCAL_WORLD_SIZE

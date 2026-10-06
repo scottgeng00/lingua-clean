@@ -28,8 +28,10 @@ export MIDTRAIN_ROOT="${MIDTRAIN_ROOT:-${CACHE_DIR}/runs/midtrain}"
 export EVAL_ROOT="${EVAL_ROOT:-${CACHE_DIR}/runs/evals}"
 export SLURM_LOG_DIR="${SLURM_LOG_DIR:-${CACHE_DIR}/runs/slurm_logs}"
 
-# Conda. OLMES env is separate because it pins different vLLM/transformers versions.
-export LINGUA_CONDA_ENV="${LINGUA_CONDA_ENV:-lingua-clean}"
+# Python envs. LINGUA_VENV is the uv venv built by bin/install_requirements.sh.
+# OLMES env is separate because it pins different vLLM/transformers versions;
+# it may be either a venv or a conda env.
+export LINGUA_VENV="${LINGUA_VENV:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.venv}"
 export OLMES_CONDA_ENV="${OLMES_CONDA_ENV:-/checkpoint/comem/jacquelinehe/miniconda3/envs/olmes}"
 
 # SLURM. Leave a value empty to omit the flag and use the site default.

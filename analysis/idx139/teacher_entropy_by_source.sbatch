@@ -23,8 +23,7 @@ set -e
 : "${LINGUA_CLEAN_ROOT:?source scripts/env.sh first}"
 source "${LINGUA_CLEAN_ROOT}/scripts/env.sh"
 
-eval "$(conda shell.bash hook)"
-conda activate "${LINGUA_CONDA_ENV}"
+source "${LINGUA_VENV}/bin/activate"
 
 export CUDA_VISIBLE_DEVICES=0
 export TOKENIZERS_PARALLELISM=false
