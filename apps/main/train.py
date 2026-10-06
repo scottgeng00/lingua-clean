@@ -1886,6 +1886,7 @@ def compute_student_entropy_gated_rkl_loss(
     return total_loss, stats
 
 
+@dataclass
 class TrainArgs:
     name: str = "lingua"
     dump_dir: str = ""

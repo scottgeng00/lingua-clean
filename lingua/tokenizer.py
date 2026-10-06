@@ -236,9 +236,15 @@ def force_support(tokenizer: PreTrainedTokenizerFast) -> None:
             Overwrites the underlying post processor with the current `bos_token` and
             `eos_token`.
             """
-            if not isinstance(
-                self._tokenizer.post_processor, processors.TemplateProcessing
-            ) and not isinstance(self._tokenizer.post_processor, processors.Sequence):
+            # Tokenizers with no post processor (e.g. OLMo-2) or a ByteLevel one
+            # (e.g. Qwen2.5/3, which only trims offsets and never changes ids) also
+            # get a fresh TemplateProcessing; otherwise add_bos/add_eos are
+            # silently ignored.
+            post_processor = self._tokenizer.post_processor
+            if post_processor is not None and not isinstance(
+                post_processor,
+                (processors.TemplateProcessing, processors.Sequence, processors.ByteLevel),
+            ):
                 return
 
             bos = self.bos_token
