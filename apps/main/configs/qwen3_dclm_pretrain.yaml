@@ -97,10 +97,9 @@ logging:
     entity: ${oc.env:WANDB_ENTITY,null}
     resume: allow
 
-# Async eval every checkpoint: OLMES downstream tasks (vLLM, in $OLMES_CONDA_ENV;
+# Async eval every checkpoint: OLMES base-model tasks (vLLM, in $OLMES_CONDA_ENV;
 # the checkpoint is exported as Qwen3ForCausalLM first) plus held-out perplexity
-# on each of the six Dolmino sources (<source>/*.val.jsonl). Task list matches
-# the repo's mid-training recipes (e.g. recipes/ntp_baseline.yaml).
+# on each of the six Dolmino sources (<source>/*.val.jsonl, 100 docs each).
 async_eval_gpus: 1
 eval_backend: olmes
 eval:
@@ -112,19 +111,20 @@ eval:
   harness: null
   olmes:
     tasks:
+      # Accuracy: rank classification (likelihood of each option's text, per-char
+      # normalized) for the MC tasks, as in OLMo 3's small-scale base evals;
+      # gsm8k is 8-shot CoT generation, exact match on the final answer.
+      - sciq:rc::olmo3
+      - mmlu:rc::olmes
+      - arc_easy:rc::olmes:full
+      - piqa:rc::olmes:full
       - gsm8k::olmes
-      - arc_challenge::olmes
-      - hellaswag::olmes
-      - mmlu::olmes
-      - winogrande::olmes
-      - truthfulqa
-      - naturalqs::olmes
-      - drop::olmes
-      - mmlu_pro:mc::none
-      - agi_eval_english:1shot::olmes
-      - triviaqa::olmes
-      - minerva_math_500::olmes
-      - simpleqa::no-judge-short-form
+      # Bits-per-byte of the gold answer: smooth, low-noise curves at small scale.
+      - sciq:rc:bpb::olmo3
+      - mmlu:rc:bpb::olmes
+      - arc_easy:rc:bpb::olmes:full
+      - piqa:rc:bpb::olmes:full
+      - gsm8k:bpb::olmes
     model_type: vllm
     tokenizer_path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base
     tokenizer_revision: main
