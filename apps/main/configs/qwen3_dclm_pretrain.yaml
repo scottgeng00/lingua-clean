@@ -1,0 +1,139 @@
+# DCLM-only baseline for qwen3_pretrain.yaml: identical model, tokenizer and
+# optimizer, trained on dclm_shuffled alone for ~20B tokens. Validation covers
+# all six Dolmino sources so it is directly comparable with the mix run.
+#
+# Matches Qwen3-0.6B (hf config.json): dim 1024, 28 layers, 16 q / 8 kv heads,
+# head_dim 128 (decoupled from dim), SwiGLU 3072, RMSNorm eps 1e-6, pre-norm,
+# no biases, per-head QK-norm, RoPE theta 1e6, tied embeddings, 0.02 init,
+# Qwen3 tokenizer. ~0.60B params total (0.44B non-embedding), as Qwen3-0.6B.
+#
+# Known deviations from real Qwen3 (need code changes to close):
+#   - Embedding init uses dim**-0.5 (~0.031) rather than 0.02; init_base_std
+#     only reaches the transformer blocks.
+#   - Vocab is len(tokenizer) = 151669 rather than Qwen's padded 151936.
+#
+# Tokenizer: Qwen/Qwen3-0.6B-Base (eos = <|endoftext|>, no BOS) at the path
+# under data.tokenizer.path below.
+#
+# Budget: global batch 256 seqs x 4096 tok = ~1.05M tokens/step
+#   (4 nodes = 32 GPUs x 8 seq/GPU, no grad accumulation; on 2 nodes set
+#   grad_acc_steps=2 to keep 256). 19074 steps = ~20.0B tokens.
+name: qwen3-0p6b-dclm20b
+dump_dir: ${oc.env:MIDTRAIN_ROOT}/qwen3_dclm_pretrain
+steps: 19074
+probe_freq: null
+seed: 777
+grad_acc_steps: 1
+
+optim:
+  lr: 2.65e-3
+  weight_decay: 0.05
+  warmup: 954                 # ~1B tokens at 256 x 4096 per step
+  lr_min_ratio: 0.01
+  clip: 1.0
+  beta1: 0.9
+  beta2: 0.95
+  scheduler: cosine
+
+distributed:
+  fsdp_type: full_shard
+  compile: true
+  model_dtype: bf16
+  matmul_allow_tf32: true
+  selective_activation_checkpointing: false
+  tp_size: 1
+
+# Qwen3-0.6B shape.
+model:
+  dim: 1024
+  n_layers: 28
+  n_heads: 16
+  n_kv_heads: 8
+  head_dim: 128
+  ffn_dim_multiplier: 1.125   # round_up(1.125 * int(8*1024/3), 256) = 3072
+  multiple_of: 256
+  norm_eps: 1e-6
+  rope_theta: 1000000
+  max_seqlen: 4096
+  weight_tying: true
+  qk_norm: true
+  qk_norm_per_head: true
+  post_norm: false
+  hf_arch: Qwen3ForCausalLM
+  init_base_std: 0.02
+
+checkpoint:
+  init_ckpt_path: null
+  dump:
+    every: 1000
+    keep: -1
+  eval:
+    every: 1000
+    keep: -1
+
+data:
+  root_dir: ${oc.env:DATA_ROOT}
+  batch_size: 8
+  prefetch_size: 64
+  seq_len: 4096
+  n_views: 2
+  load_async: true
+  add_bos: false              # Qwen tokenizer has no BOS token
+  add_eos: true               # <|endoftext|> between documents
+  disable_cross_doc_attn: true
+  sources:
+    dclm_shuffled: 1.0
+  tokenizer:
+    name: hf
+    path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base
+
+profiling:
+  run: false
+
+logging:
+  freq: 10
+  wandb:
+    project: "lingua-clean-pretrain"
+    entity: ${oc.env:WANDB_ENTITY,null}
+    resume: allow
+
+# Async eval every checkpoint: OLMES downstream tasks (vLLM, in $OLMES_CONDA_ENV;
+# the checkpoint is exported as Qwen3ForCausalLM first) plus held-out perplexity
+# on each of the six Dolmino sources (<source>/*.val.jsonl). Task list matches
+# the repo's mid-training recipes (e.g. recipes/ntp_baseline.yaml).
+async_eval_gpus: 1
+eval_backend: olmes
+eval:
+  dump_dir: ${oc.env:EVAL_ROOT}/slurm_eval_logs
+  generator:
+    max_tokens: 4096
+    temperature: 0.0
+    dtype: bf16
+  harness: null
+  olmes:
+    tasks:
+      - gsm8k::olmes
+      - arc_challenge::olmes
+      - hellaswag::olmes
+      - mmlu::olmes
+      - winogrande::olmes
+      - truthfulqa
+      - naturalqs::olmes
+      - drop::olmes
+      - mmlu_pro:mc::none
+      - agi_eval_english:1shot::olmes
+      - triviaqa::olmes
+      - minerva_math_500::olmes
+      - simpleqa::no-judge-short-form
+    model_type: vllm
+    tokenizer_path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base
+    tokenizer_revision: main
+    max_length: 4096
+    gpu_memory_utilization: 0.8
+    trust_remote_code: true
+    olmes_env: ${oc.env:OLMES_CONDA_ENV}
+  validation:
+    max_steps: 1000
+    use_val_from_train_src: true    # dclm_shuffled
+    root_dir: ${oc.env:DATA_ROOT}
+    sources: [math_shuffled, flan_shuffled, wiki_shuffled, pes2o_shuffled, stackexchange_shuffled]
