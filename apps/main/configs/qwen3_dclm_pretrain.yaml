@@ -119,10 +119,15 @@ eval:
       - mmlu:rc::olmes
       - arc_easy:rc::olmes:full
       - piqa:rc::olmes:full
-      # 8-shot CoT generation, exact match on the final answer.
+      # Generative: gsm8k 8-shot CoT (exact match), triviaqa 5-shot (F1).
       - gsm8k::olmes
+      - triviaqa::olmes
       # Generative tasks need a separate pass for gold-answer BPB (no generation).
       - gsm8k:bpb::olmes
+      - triviaqa:bpb::olmes
+      # Code: gold-solution BPB only, as in OLMo 3's small-scale code eval (pass@1
+      # is ~0 for a 0.6B model with little code data and needs code execution).
+      - mbpp:3shot:bpb::none
     model_type: vllm
     tokenizer_path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base
     tokenizer_revision: main
