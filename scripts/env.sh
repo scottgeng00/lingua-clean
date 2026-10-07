@@ -30,7 +30,7 @@ export SLURM_LOG_DIR="${SLURM_LOG_DIR:-${CACHE_DIR}/runs/slurm_logs}"
 # OLMES env is separate because it pins different vLLM/transformers versions;
 # it may be either a venv or a conda env.
 export LINGUA_VENV="${LINGUA_VENV:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.venv}"
-export OLMES_CONDA_ENV="${OLMES_CONDA_ENV:-/home/sgeng/scottg/pretrain/olmes/.venv}"
+export OLMES_CONDA_ENV="${OLMES_CONDA_ENV:-/home/sgeng/scottg/pretrain/olmes/.venv-lmeval}"  # OLMES ported to lm_eval 0.4.13 (branch lm-eval-0.4.13)
 
 # SLURM. Leave a value empty to omit the flag and use the site default.
 export SLURM_ACCOUNT="${SLURM_ACCOUNT:-dream}"

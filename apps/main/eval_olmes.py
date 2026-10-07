@@ -80,6 +80,10 @@ class OlmesArgs:
         "OLMES_CONDA_ENV",
         os.path.join(os.environ.get("HOME", ""), "miniconda3", "envs", "olmes"),
     )
+    # Kill OLMES if it runs longer than this: a crashed vLLM run can leave the
+    # process alive (worker processes don't exit) and hold the GPU until the
+    # job's time limit.
+    timeout_hours: float = 3.0
 
 
 @dataclass
@@ -227,13 +231,17 @@ def run_olmes(hf_path: str, olmes_args: OlmesArgs, output_dir: str) -> Optional[
     """Run OLMES evaluation via subprocess with the olmes conda environment."""
     os.makedirs(output_dir, exist_ok=True)
 
-    model_args = json.dumps({
+    model_args = {
         "trust_remote_code": olmes_args.trust_remote_code,
         "gpu_memory_utilization": olmes_args.gpu_memory_utilization,
         "max_length": olmes_args.max_length,
         "tokenizer": olmes_args.tokenizer_path,
-        "tokenizer_revision": olmes_args.tokenizer_revision,
-    })
+    }
+    # Newer OLMES rejects unknown model args ("Hashing error! Key tokenizer_revision
+    # not in defaults"), so only pass a revision when one is actually requested.
+    if olmes_args.tokenizer_revision and olmes_args.tokenizer_revision != "main":
+        model_args["tokenizer_revision"] = olmes_args.tokenizer_revision
+    model_args = json.dumps(model_args)
 
     tasks_str = " ".join(olmes_args.tasks)
 
@@ -275,13 +283,24 @@ olmes \
     clean_env = _clean_env_for_olmes()
     logger.info(f"Running OLMES evaluation:\n{cmd}")
     logger.info("Clean env — removed all SLURM/NCCL/MPI/PMIX/TORCHELASTIC/distributed vars")
-    result = subprocess.run(
-        ["bash", "-c", cmd], text=True, capture_output=False, env=clean_env,
-    )
+    proc = subprocess.Popen(["bash", "-c", cmd], text=True, env=clean_env, start_new_session=True)
+    try:
+        proc.wait(timeout=olmes_args.timeout_hours * 3600)
+    except subprocess.TimeoutExpired:
+        logger.error(f"OLMES still running after {olmes_args.timeout_hours}h; killing it")
+        import signal
+        os.killpg(proc.pid, signal.SIGKILL)  # whole group, incl. vLLM workers
+        proc.wait()
+    result = proc
 
     if result.returncode != 0:
-        logger.error(f"OLMES evaluation failed with return code {result.returncode}")
-        return None
+        if (Path(output_dir) / "metrics.json").exists():
+            # OLMES writes metrics.json last; if it then hung on exit and was killed,
+            # the results are complete.
+            logger.warning(f"OLMES exited with code {result.returncode} after writing metrics.json; using the results")
+        else:
+            logger.error(f"OLMES evaluation failed with return code {result.returncode}")
+            return None
 
     metrics_file = Path(output_dir) / "metrics.json"
     if not metrics_file.exists():
