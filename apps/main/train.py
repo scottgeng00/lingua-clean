@@ -6987,7 +6987,10 @@ def train(args: TrainArgs):
                         logger.info(f"  {key}: {v:.4f}")
                     logger.info("=" * 60)
             else:
-                loss = model(input_ids, labels)
+                # cu_seqlens is None unless data.disable_cross_doc_attn is set, in
+                # which case attention is restricted to each packed document.
+                loss = model(input_ids, labels,
+                             cu_seqlens=cu_seqlens_tensor, max_seqlen=max_seqlen)
             if args.grad_acc_steps > 1:
                 model.set_requires_gradient_sync(train_state.acc_step == 0)
 

@@ -15,20 +15,20 @@
 # Tokenizer: Qwen/Qwen3-0.6B-Base (eos = <|endoftext|>, no BOS) at the path
 # under data.tokenizer.path below.
 #
-# Budget at the defaults (2 nodes = 16 GPUs):
-#   8 seq/GPU x 4096 tok x 16 GPU x 2 grad_acc = ~1.05M tokens/step
-#   20000 steps = ~21B tokens (~35 tokens/param).
+# Budget: global batch 256 seqs x 4096 tok = ~1.05M tokens/step
+#   (4 nodes = 32 GPUs x 8 seq/GPU, no grad accumulation; on 2 nodes set
+#   grad_acc_steps=2 to keep 256). 23000 steps = ~24B tokens (~2x Chinchilla).
 name: qwen3-0p6b-dolmino
 dump_dir: ${oc.env:MIDTRAIN_ROOT}/qwen3_pretrain
-steps: 20000
+steps: 23000
 probe_freq: null
 seed: 777
-grad_acc_steps: 2
+grad_acc_steps: 1
 
 optim:
-  lr: 3e-3
-  weight_decay: 0.033
-  warmup: 2000
+  lr: 2.65e-3
+  weight_decay: 0.05
+  warmup: 954                 # ~1B tokens at 256 x 4096 per step
   lr_min_ratio: 0.01
   clip: 1.0
   beta1: 0.9
