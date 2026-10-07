@@ -112,18 +112,16 @@ eval:
   olmes:
     tasks:
       # Accuracy: rank classification (likelihood of each option's text, per-char
-      # normalized) for the MC tasks, as in OLMo 3's small-scale base evals;
-      # gsm8k is 8-shot CoT generation, exact match on the final answer.
+      # normalized) for the MC tasks, as in OLMo 3's small-scale base evals. RC
+      # tasks also report bits_per_byte_corr (gold-answer BPB) from the same
+      # requests, so no separate :bpb tasks are needed for them.
       - sciq:rc::olmo3
       - mmlu:rc::olmes
       - arc_easy:rc::olmes:full
       - piqa:rc::olmes:full
+      # 8-shot CoT generation, exact match on the final answer.
       - gsm8k::olmes
-      # Bits-per-byte of the gold answer: smooth, low-noise curves at small scale.
-      - sciq:rc:bpb::olmo3
-      - mmlu:rc:bpb::olmes
-      - arc_easy:rc:bpb::olmes:full
-      - piqa:rc:bpb::olmes:full
+      # Generative tasks need a separate pass for gold-answer BPB (no generation).
       - gsm8k:bpb::olmes
     model_type: vllm
     tokenizer_path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base
