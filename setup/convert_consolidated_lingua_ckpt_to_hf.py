@@ -143,6 +143,7 @@ def write_model(
     safe_serialization=True,
     push_to_hub=False,
     hf_arch_override=None,
+    keep_padded_vocab=False,
 ):
     print("Converting the model.")
     params = read_json(os.path.join(input_base_path, "params.json"))
@@ -210,7 +211,11 @@ def write_model(
         embed_vocab_size = loaded['tok_embeddings.weight'].shape[0]
 
         # Check if model weights have expanded vocab (e.g., special tokens added during Lingua conversion)
-        if tokenizer_vocab_size < model_vocab_size and model_vocab_size == embed_vocab_size == params['vocab_size']:
+        if keep_padded_vocab and tokenizer_vocab_size <= model_vocab_size and model_vocab_size == embed_vocab_size == params['vocab_size']:
+            # Keep the padded embedding rows (e.g. Qwen pads 151669 -> 151936) so an
+            # HF -> Lingua -> HF round trip is bit-exact.
+            vocab_size = model_vocab_size
+        elif tokenizer_vocab_size < model_vocab_size and model_vocab_size == embed_vocab_size == params['vocab_size']:
             print(f"Warning: Tokenizer vocab ({tokenizer_vocab_size}) < model vocab ({model_vocab_size}). "
                   f"Trimming embeddings to match tokenizer.")
             # Trim tok_embeddings and output to match tokenizer vocab
@@ -530,6 +535,10 @@ def main():
         '--save_tokenizer', action='store_true', default=False, help='Whether or not to save the tokenizer.'
     )
     parser.add_argument(
+        "--keep_padded_vocab", action="store_true", default=False,
+        help="Keep embedding rows beyond len(tokenizer) instead of trimming them (lossless round trips).",
+    )
+    parser.add_argument(
         "--hf_arch", choices=list(HF_ARCH_SPECS), default=None,
         help="Only for checkpoints whose params.json predates model.hf_arch.",
     )
@@ -542,6 +551,7 @@ def main():
         safe_serialization=args.safe_serialization,
         push_to_hub=args.push_to_hub,
         hf_arch_override=args.hf_arch,
+        keep_padded_vocab=args.keep_padded_vocab,
     )
 
     if args.save_tokenizer:

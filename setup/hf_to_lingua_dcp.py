@@ -14,6 +14,8 @@ Supported model families:
   - OLMo-2 (any `OLMo-2*` or `*olmo2*` repo id)
   - meta-llama/* (downloads `original/consolidated.00.pth`; assumes a single-shard original)
   - TinyLlama/*
+  - Qwen2/Qwen2.5 and Qwen3 dense models (detected from config.architectures;
+    --model may also be a local HF directory)
 
 Sample usage:
     python setup/hf_to_lingua_dcp.py \\
@@ -51,6 +53,13 @@ def inverse_permute_norm(w, n_heads):
     """1D QK-norm: HF split-half → Lingua interleaved."""
     head_dim = w.shape[0] // n_heads
     return w.view(n_heads, 2, head_dim // 2).transpose(1, 2).reshape(-1)
+
+
+def _hf_architecture(name_or_path, revision=None):
+    from transformers import AutoConfig
+    kwargs = {"revision": revision} if revision is not None else {}
+    archs = getattr(AutoConfig.from_pretrained(name_or_path, **kwargs), "architectures", None) or [None]
+    return archs[0]
 
 
 _DTYPE_MAP = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}
@@ -205,6 +214,97 @@ def convert_tinyllama(model, output_dir, tokenizer_path):
     return out
 
 
+def convert_qwen(model, output_dir, tokenizer_path):
+    """Qwen2 (q/k/v biases) and Qwen3 (per-head QK-norm) dense models -> Lingua."""
+    config = model.config
+    arch = config.architectures[0]
+    assert arch in ("Qwen2ForCausalLM", "Qwen3ForCausalLM"), arch
+    is_qwen3 = arch == "Qwen3ForCausalLM"
+    dim = config.hidden_size
+    n_heads = config.num_attention_heads
+    n_kv_heads = config.num_key_value_heads
+    head_dim = getattr(config, "head_dim", None) or dim // n_heads
+    tied = bool(config.tie_word_embeddings)
+
+    rename_map = {
+        "model.embed_tokens.weight": "tok_embeddings.weight",
+        "model.layers.{}.self_attn.q_proj.weight": "layers.{}.attention.wq.weight",
+        "model.layers.{}.self_attn.k_proj.weight": "layers.{}.attention.wk.weight",
+        "model.layers.{}.self_attn.v_proj.weight": "layers.{}.attention.wv.weight",
+        "model.layers.{}.self_attn.q_proj.bias": "layers.{}.attention.wq.bias",
+        "model.layers.{}.self_attn.k_proj.bias": "layers.{}.attention.wk.bias",
+        "model.layers.{}.self_attn.v_proj.bias": "layers.{}.attention.wv.bias",
+        "model.layers.{}.self_attn.o_proj.weight": "layers.{}.attention.wo.weight",
+        "model.layers.{}.self_attn.q_norm.weight": "layers.{}.attention.q_norm.weight",
+        "model.layers.{}.self_attn.k_norm.weight": "layers.{}.attention.k_norm.weight",
+        "model.layers.{}.mlp.gate_proj.weight": "layers.{}.feed_forward.w1.weight",
+        "model.layers.{}.mlp.up_proj.weight": "layers.{}.feed_forward.w3.weight",
+        "model.layers.{}.mlp.down_proj.weight": "layers.{}.feed_forward.w2.weight",
+        "model.layers.{}.input_layernorm.weight": "layers.{}.attention_norm.weight",
+        "model.layers.{}.post_attention_layernorm.weight": "layers.{}.ffn_norm.weight",
+        "model.norm.weight": "norm.weight",
+        "lm_head.weight": "output.weight",
+    }
+
+    out = {}
+    for key, value in model.state_dict().items():
+        abstract_key = re.sub(r"\.(\d+)\.", ".{}.", key)
+        new_key = rename_map.get(abstract_key)
+        if new_key is None:
+            raise ValueError(f"Unmapped Qwen key: {key}")
+        if "{}" in new_key:
+            new_key = new_key.format(re.search(r"\.(\d+)\.", key).group(1))
+
+        # RoPE: HF split-half -> Lingua interleaved, for q/k rows (weights and biases)
+        if new_key.endswith("wq.weight"):
+            value = inverse_permute(value, n_heads=n_heads, dim1=n_heads * head_dim, dim2=dim)
+        elif new_key.endswith("wk.weight"):
+            value = inverse_permute(value, n_heads=n_kv_heads, dim1=n_kv_heads * head_dim, dim2=dim)
+        elif new_key.endswith("wq.bias"):
+            value = inverse_permute_norm(value, n_heads=n_heads)
+        elif new_key.endswith("wk.bias"):
+            value = inverse_permute_norm(value, n_heads=n_kv_heads)
+        elif new_key.endswith(("q_norm.weight", "k_norm.weight")):
+            value = inverse_permute_norm(value, n_heads=1)  # per-head norm of size head_dim
+        out[new_key] = value.clone()
+    if tied:
+        # LMTransformer's tied head registers the shared embedding under all three names.
+        out["output.weight"] = out["tok_embeddings.weight"]
+        out["output.tied_module.weight"] = out["tok_embeddings.weight"]
+
+    # FFN width: lingua computes round_up(ffn_dim_multiplier * int(8*dim/3), multiple_of);
+    # with multiple_of = intermediate_size this reproduces it exactly.
+    base = int(2 * 4 * dim / 3)
+    params = {
+        "model": {
+            "dim": dim,
+            "n_layers": config.num_hidden_layers,
+            "n_heads": n_heads,
+            "n_kv_heads": n_kv_heads,
+            "head_dim": head_dim,
+            "vocab_size": config.vocab_size,
+            "ffn_dim_multiplier": config.intermediate_size / base,
+            "multiple_of": config.intermediate_size,
+            "norm_eps": config.rms_norm_eps,
+            "rope_theta": config.rope_theta,
+            "max_seqlen": config.max_position_embeddings,
+            "weight_tying": tied,
+            "qk_norm": is_qwen3,
+            "qk_norm_per_head": is_qwen3,
+            "post_norm": False,
+            "qkv_bias": not is_qwen3,
+            "hf_arch": arch,
+        },
+        "data": {"tokenizer": {"name": "hf", "path": tokenizer_path}},
+        "distributed": {"model_dtype": "bf16"},
+    }
+    params_path = os.path.join(output_dir, "consolidated", "params.json")
+    with open(params_path, "w") as f:
+        json.dump(params, f, indent=4)
+    print(f"  Wrote params.json to {params_path}")
+    return out
+
+
 def download_and_convert(hf_model_name, output_dir, dtype="float32", revision=None):
     consolidated_dir = os.path.join(output_dir, "consolidated")
     consolidated_path = os.path.join(consolidated_dir, "consolidated.pth")
@@ -234,6 +334,11 @@ def download_and_convert(hf_model_name, output_dir, dtype="float32", revision=No
             hf_model_name, torch_dtype=torch_dtype, trust_remote_code=True, **model_kwargs
         )
         final_state_dict = convert_olmo2(model, output_dir, tokenizer_path=os.path.join(output_dir, "tokenizer"))
+        torch.save(final_state_dict, consolidated_path)
+    elif _hf_architecture(hf_model_name, revision) in ("Qwen2ForCausalLM", "Qwen3ForCausalLM"):
+        print(f"Loading Qwen model from {hf_model_name} (revision={revision})...")
+        model = AutoModelForCausalLM.from_pretrained(hf_model_name, torch_dtype=torch_dtype, **model_kwargs)
+        final_state_dict = convert_qwen(model, output_dir, tokenizer_path=os.path.join(output_dir, "tokenizer"))
         torch.save(final_state_dict, consolidated_path)
     elif hf_model_name.startswith("TinyLlama"):
         print(f"Loading TinyLlama model from HuggingFace (revision={revision})...")
