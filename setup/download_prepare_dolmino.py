@@ -11,7 +11,7 @@ End layout, with `--data-dir ${DATA_ROOT}`:
       pes2o_shuffled/pes2o.chunk.{00..NN}.jsonl
       stackexchange_shuffled/stackexchange.chunk.{00..NN}.jsonl
       wiki_shuffled/wiki.chunk.{00..NN}.jsonl
-      <domain>_shuffled/<domain>.val.jsonl   # ~34 val docs per domain
+      <domain>_shuffled/<domain>.val.jsonl   # 100 held-out val docs per domain
 
 The `<domain>_shuffled/` directories are what the recipe YAMLs reference under
 `data.sources:` (e.g. `dclm_shuffled: 0.472`). Skip the raw dir to save ~1.5 TB
@@ -251,7 +251,7 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--nchunks", type=int, default=32,
                     help="Per-domain output chunks. 32 matches the in-house layout.")
-    ap.add_argument("--val-docs", type=int, default=34,
+    ap.add_argument("--val-docs", type=int, default=100,
                     help="Validation docs per domain (first lines of the shuffled stream).")
     ap.add_argument("--in-memory-max-raw-gb", type=float, default=50,
                     help="Domains whose raw shards exceed this (compressed GB) go through terashuf; "
