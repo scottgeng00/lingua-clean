@@ -7524,6 +7524,9 @@ def train(args: TrainArgs):
                         eval_args.wandb.entity = wandb.run.entity
                     assert args.async_eval_gpus > 0
                     logger.info(f"Launching {eval_backend} evals on {args.async_eval_gpus} gpus")
+                    # Read before clean_env(), which strips every SLURM_* variable.
+                    eval_account = os.environ.get("SLURM_ACCOUNT", "dream")
+                    eval_qos = os.environ.get("SLURM_QOS", "h200_dream_high")
                     with clean_env():
                         launch_job(
                             StoolArgs(
@@ -7534,8 +7537,8 @@ def train(args: TrainArgs):
                                 ngpu=args.async_eval_gpus,
                                 time=480,
                                 mem="200GB",
-                                account=os.environ.get("SLURM_ACCOUNT", "comem"),
-                                qos=os.environ.get("SLURM_QOS", "h200_dev"),
+                                account=eval_account,
+                                qos=eval_qos,
                                 override=False,
                                 dirs_exists_ok=True,
                                 anaconda=os.environ.get("LINGUA_VENV", "default"),

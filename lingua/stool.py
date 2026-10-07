@@ -71,7 +71,7 @@ export HF_DATASETS_CACHE=${{HF_DATASETS_CACHE:-$HOME/.cache/huggingface/datasets
 
 export OMP_NUM_THREADS=1
 export LAUNCH_WITH="SBATCH"
-export WANDB_MODE=offline
+export WANDB_MODE=${{WANDB_MODE:-offline}}
 export DUMP_DIR={dump_dir}
 
 # For single-task jobs, run python directly to avoid srun setting distributed env vars

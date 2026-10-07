@@ -402,8 +402,8 @@ def clean_env():
         "TORCHELASTIC_RUN_ID",
         "DORA_FORCE_DISTRIB",
     )
-    # Preserve WANDB_API_KEY so async eval jobs can authenticate
-    preserve_vars = ("WANDB_API_KEY",)
+    # Preserve wandb credentials/mode so async eval jobs can log to the same run
+    preserve_vars = ("WANDB_API_KEY", "WANDB_MODE", "WANDB_BASE_URL")
     cluster_env = {
         x: os.environ.pop(x)
         for x in list(os.environ.keys())
