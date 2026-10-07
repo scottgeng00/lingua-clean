@@ -324,8 +324,9 @@ class PackedCausalTransformerGenerator:
     @torch.inference_mode()
     def generate(self, prompts):
         # Tokenize
+        add_bos = getattr(self.tokenizer, "bos_id", None) is not None  # e.g. Qwen has no BOS
         prompts = [
-            self.tokenizer.encode(p, add_bos=True, add_eos=False) for p in prompts
+            self.tokenizer.encode(p, add_bos=add_bos, add_eos=False) for p in prompts
         ]
         # Truncate
         max_seqlen = (

@@ -123,7 +123,7 @@ class EvalHarnessLM(LM):
         self.accelerator = MockAccelerator()
         self._rank = get_global_rank()
         self._world_size = get_world_size()
-        self.device = generator.device
+        self._device = generator.device  # lm-eval >= 0.4.x exposes LM.device as a read-only property
 
     def generate_until(self, requests: List[Instance]) -> List[str]:
         prompts, gen_args = zip(*[req.args for req in requests])
@@ -323,11 +323,12 @@ def launch_eval(cfg: EvalArgs):
         }
         if cfg.global_step is not None:
             timestamp["global_step"] = cfg.global_step
-        print(
-            json.dumps(timestamp | results["results"]),
-            file=open(metric_log_path, mode="a"),
-            flush=True,
-        )
+        if results is not None:  # None when no harness tasks are configured (harness: null)
+            print(
+                json.dumps(timestamp | results["results"]),
+                file=open(metric_log_path, mode="a"),
+                flush=True,
+            )
 
         val_log_path = Path(cfg.metric_log_dir) / "metrics.validation.jsonl"
         if val_results is not None:
