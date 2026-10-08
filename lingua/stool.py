@@ -5,7 +5,7 @@ import json
 import os
 import shutil
 import subprocess
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 
 from omegaconf import OmegaConf
 
@@ -27,6 +27,9 @@ class StoolArgs:
     ncpu: int = 16  # The number of CPUs allocated per GPU.
     mem: str = ""  # The amount of memory to allocate.
     anaconda: str = "default"  # The path to the python venv (or "default" = current `python`).
+    # Processes per node; defaults to one per GPU. Scripts that use all GPUs from a
+    # single process (e.g. apps.main.eval_olmes) set this to 1.
+    tasks_per_node: Optional[int] = None
     constraint: str = ""  # The constraint on the nodes.
     exclude: str = ""  # The nodes to exclude.
     time: int = -1  # The time limit of the job (in minutes).
@@ -200,7 +203,7 @@ def launch_job(args: StoolArgs):
         script=args.script,
         dump_dir=dump_dir,
         nodes=args.nodes,
-        tasks=args.nodes * args.ngpu,
+        tasks=args.nodes * (args.tasks_per_node or args.ngpu),
         nodes_per_run=args.nodes,
         ngpus=args.ngpu,
         ncpu=args.ncpu,

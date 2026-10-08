@@ -19,6 +19,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -227,10 +228,36 @@ def _clean_env_for_olmes() -> dict:
     return env
 
 
-def run_olmes(hf_path: str, olmes_args: OlmesArgs, output_dir: str) -> Optional[dict]:
-    """Run OLMES evaluation via subprocess with the olmes conda environment."""
-    os.makedirs(output_dir, exist_ok=True)
+# Rough relative cost of OLMES tasks, for balancing tasks across GPUs.
+_OLMES_TASK_COST = {"mmlu": 6, "mmlu_pro": 6, "gsm8k": 4, "triviaqa": 4, "naturalqs": 3, "drop": 3, "minerva_math": 3}
 
+
+def _task_cost(task: str) -> int:
+    base = task.split(":")[0]
+    if ":bpb" in task:  # gold-likelihood pass only, no generation
+        return 1
+    return _OLMES_TASK_COST.get(base, 1)
+
+
+def _visible_gpus() -> List[str]:
+    vis = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if vis:
+        return [g for g in vis.split(",") if g.strip()]
+    return [str(i) for i in range(torch.cuda.device_count())]
+
+
+def _shard_tasks(tasks: List[str], n: int) -> List[List[str]]:
+    """Longest-processing-time-first assignment of tasks to n shards."""
+    shards: List[List[str]] = [[] for _ in range(n)]
+    load = [0] * n
+    for t in sorted(tasks, key=_task_cost, reverse=True):
+        i = load.index(min(load))
+        shards[i].append(t)
+        load[i] += _task_cost(t)
+    return [sh for sh in shards if sh]
+
+
+def _olmes_cmd(hf_path: str, olmes_args: OlmesArgs, tasks: List[str], output_dir: str) -> str:
     model_args = {
         "trust_remote_code": olmes_args.trust_remote_code,
         "gpu_memory_utilization": olmes_args.gpu_memory_utilization,
@@ -242,8 +269,6 @@ def run_olmes(hf_path: str, olmes_args: OlmesArgs, output_dir: str) -> Optional[
     if olmes_args.tokenizer_revision and olmes_args.tokenizer_revision != "main":
         model_args["tokenizer_revision"] = olmes_args.tokenizer_revision
     model_args = json.dumps(model_args)
-
-    tasks_str = " ".join(olmes_args.tasks)
 
     conda_exe = os.environ.get("CONDA_EXE", "conda")
     olmes_env = olmes_args.olmes_env
@@ -276,39 +301,72 @@ olmes \
     --model {hf_path} \
     --model-type {olmes_args.model_type} \
     --model-args '{model_args}' \
-    --task {tasks_str} \
+    --task {' '.join(tasks)} \
     --output-dir {output_dir}
 """
 
-    clean_env = _clean_env_for_olmes()
-    logger.info(f"Running OLMES evaluation:\n{cmd}")
-    logger.info("Clean env — removed all SLURM/NCCL/MPI/PMIX/TORCHELASTIC/distributed vars")
-    proc = subprocess.Popen(["bash", "-c", cmd], text=True, env=clean_env, start_new_session=True)
+    return cmd
+
+
+def _wait_olmes(proc: subprocess.Popen, deadline: float, label: str) -> int:
     try:
-        proc.wait(timeout=olmes_args.timeout_hours * 3600)
+        proc.wait(timeout=max(1.0, deadline - time.time()))
     except subprocess.TimeoutExpired:
-        logger.error(f"OLMES still running after {olmes_args.timeout_hours}h; killing it")
+        logger.error(f"OLMES {label} still running at the time limit; killing it")
         import signal
         os.killpg(proc.pid, signal.SIGKILL)  # whole group, incl. vLLM workers
         proc.wait()
-    result = proc
+    return proc.returncode
 
-    if result.returncode != 0:
-        if (Path(output_dir) / "metrics.json").exists():
+
+def run_olmes(hf_path: str, olmes_args: OlmesArgs, output_dir: str) -> Optional[dict]:
+    """Run OLMES in the OLMES env; with N visible GPUs, split the tasks into N
+    shards, run one OLMES process per GPU, and merge the shards' metrics.json."""
+    os.makedirs(output_dir, exist_ok=True)
+    gpus = _visible_gpus() or [None]
+    shards = _shard_tasks(list(olmes_args.tasks), len(gpus))
+    clean_env = _clean_env_for_olmes()
+    logger.info("Clean env — removed all SLURM/NCCL/MPI/PMIX/TORCHELASTIC/distributed vars")
+
+    procs = []
+    for i, tasks in enumerate(shards):
+        out = output_dir if len(shards) == 1 else str(Path(output_dir) / f"shard_{i}")
+        cmd = _olmes_cmd(hf_path, olmes_args, tasks, out)
+        env = dict(clean_env)
+        if gpus[i] is not None:
+            env["CUDA_VISIBLE_DEVICES"] = gpus[i]
+        logger.info(f"Running OLMES shard {i} on GPU {gpus[i]}: {tasks}\n{cmd}")
+        procs.append((i, out, subprocess.Popen(["bash", "-c", cmd], text=True, env=env, start_new_session=True)))
+
+    deadline = time.time() + olmes_args.timeout_hours * 3600
+    shard_metrics = []
+    for i, out, proc in procs:
+        rc = _wait_olmes(proc, deadline, f"shard {i}")
+        metrics_file = Path(out) / "metrics.json"
+        if rc != 0 and metrics_file.exists():
             # OLMES writes metrics.json last; if it then hung on exit and was killed,
             # the results are complete.
-            logger.warning(f"OLMES exited with code {result.returncode} after writing metrics.json; using the results")
-        else:
-            logger.error(f"OLMES evaluation failed with return code {result.returncode}")
-            return None
+            logger.warning(f"OLMES shard {i} exited with code {rc} after writing metrics.json; using the results")
+        elif rc != 0 or not metrics_file.exists():
+            logger.error(f"OLMES shard {i} failed (return code {rc}, metrics.json present: {metrics_file.exists()})")
+            continue
+        with open(metrics_file) as f:
+            shard_metrics.append(json.load(f))
 
-    metrics_file = Path(output_dir) / "metrics.json"
-    if not metrics_file.exists():
-        logger.error(f"OLMES metrics file not found at {metrics_file}")
+    if not shard_metrics:
         return None
-
-    with open(metrics_file) as f:
-        metrics = json.load(f)
+    if len(shards) == 1:
+        metrics = shard_metrics[0]
+    else:
+        metrics = {
+            "all_primary_scores": [x for m in shard_metrics for x in m.get("all_primary_scores", [])],
+            "tasks": [x for m in shard_metrics for x in m.get("tasks", [])],
+            "model_config": shard_metrics[0].get("model_config"),
+        }
+        with open(Path(output_dir) / "metrics.json", "w") as f:
+            json.dump(metrics, f)
+        if len(shard_metrics) < len(shards):
+            logger.error(f"Only {len(shard_metrics)}/{len(shards)} OLMES shards produced results")
 
     logger.info(f"OLMES evaluation complete. Tasks evaluated: {len(metrics.get('tasks', []))}")
     return metrics

@@ -7539,6 +7539,8 @@ def train(args: TrainArgs):
                                 mem="200GB",
                                 account=eval_account,
                                 qos=eval_qos,
+                                # eval_olmes uses every GPU of the job from one process
+                                tasks_per_node=1 if eval_backend == "olmes" else None,
                                 override=False,
                                 dirs_exists_ok=True,
                                 anaconda=os.environ.get("LINGUA_VENV", "default"),
