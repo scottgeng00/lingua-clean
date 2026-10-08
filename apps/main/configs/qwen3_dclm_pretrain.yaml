@@ -100,12 +100,14 @@ logging:
 # Async eval every checkpoint: OLMES base-model tasks (vLLM, in $OLMES_CONDA_ENV;
 # the checkpoint is exported as Qwen3ForCausalLM first) plus held-out perplexity
 # on each of the six Dolmino sources (<source>/*.val.jsonl, 100 docs each).
-async_eval_gpus: 1
+async_eval_gpus: 2              # eval_olmes splits the OLMES tasks across both GPUs
 eval_backend: olmes
 eval:
   dump_dir: ${oc.env:EVAL_ROOT}/slurm_eval_logs
   generator:
-    max_tokens: 4096
+    # tokens packed per forward pass for validation; docs are still truncated to
+    # the model's 4096-token context. 4096 left a 0.6B model mostly idle.
+    max_tokens: 32768
     temperature: 0.0
     dtype: bf16
   harness: null
