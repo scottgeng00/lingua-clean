@@ -28,6 +28,7 @@ groups:
       - {id: dclm3p75m_4ep,  label: "DCLM 3.75M docs (×4.3)",   dir: experiments/dclm3p75m_4ep,  color: 3}
       - {id: dclm7p5m_rw27b, label: "DCLM 7.5M + 27B rewrites", dir: experiments/dclm7p5m_rw27b, color: 4}
       - {id: dclm7p5m_rw2b,  label: "DCLM 7.5M + 2B rewrites",  dir: experiments/dclm7p5m_rw2b,  color: 5}
+      - {id: dclm7p5m_1ep,   label: "DCLM 7.5M docs (×1, 9.35B)", dir: experiments/dclm7p5m_1ep, color: 8}
 
   - id: qwen3_baselines
     title: Qwen3-0.6B baselines
@@ -37,3 +38,17 @@ groups:
     runs:
       - {id: qwen3_mix,  label: "Dolmino mix (24.1B)", dir: qwen3_pretrain,      val: val1000/metrics.validation.jsonl, color: 6}
       - {id: qwen3_dclm, label: "DCLM only (20B)",     dir: qwen3_dclm_pretrain, val: val1000/metrics.validation.jsonl, color: 7}
+
+  - id: expert_distillation
+    title: Expert distillation (Qwen3.5 tokenizer)
+    description: >
+      First 7.5M DCLM docs with a Qwen3.5-tokenizer student (~694M params): CE vs token-level
+      KD from Qwen3.5-2B-Base or Qwen3.5-2B (post-trained), at 1x (9,020 steps) and 20B tokens.
+      Per-token NLL is not comparable with Qwen3-tokenizer runs; use bits/char and BPB.
+    runs:
+      - {id: q35tok_dclm7p5m_1ep,          label: "CE, 1x",                 dir: experiments/q35tok_dclm7p5m_1ep,          color: 1}
+      - {id: q35tok_dclm7p5m_2ep,          label: "CE, 20B",                dir: experiments/q35tok_dclm7p5m_2ep,          color: 2}
+      - {id: q35tok_kd2bbase_dclm7p5m_1ep, label: "KD 2B-Base, 1x",         dir: experiments/q35tok_kd2bbase_dclm7p5m_1ep, color: 3}
+      - {id: q35tok_kd2bbase_dclm7p5m_2ep, label: "KD 2B-Base, 20B",        dir: experiments/q35tok_kd2bbase_dclm7p5m_2ep, color: 4}
+      - {id: q35tok_kd2binst_dclm7p5m_1ep, label: "KD 2B post-trained, 1x", dir: experiments/q35tok_kd2binst_dclm7p5m_1ep, color: 5}
+      - {id: q35tok_kd2binst_dclm7p5m_2ep, label: "KD 2B post-trained, 20B", dir: experiments/q35tok_kd2binst_dclm7p5m_2ep, color: 6}
