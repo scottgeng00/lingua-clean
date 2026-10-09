@@ -7430,7 +7430,11 @@ def train(args: TrainArgs):
             is_dump_step = every_n_steps(
                 train_state, args.checkpoint.dump.every, acc_step=0
             )
-            is_eval_step = every_n_steps(train_state, args.checkpoint.eval.every, acc_step=0)
+            # the last step counts as an eval step too, so the final checkpoint is saved
+            # here and evaluated even when steps isn't a multiple of eval.every
+            is_eval_step = every_n_steps(train_state, args.checkpoint.eval.every, acc_step=0) or (
+                train_state.step == args.steps and train_state.acc_step == 0
+            )
             if is_dump_step or is_eval_step:
                 saved = checkpoint.save(
                     model,
@@ -7478,9 +7482,7 @@ def train(args: TrainArgs):
                                     f"keeping previous reference"
                                 )
 
-            if args.eval is not None and every_n_steps(
-                train_state, args.checkpoint.eval.every, acc_step=0
-            ):
+            if args.eval is not None and is_eval_step:
                 eval_backend = getattr(args, "eval_backend", "harness")
 
                 if eval_backend == "olmes":
