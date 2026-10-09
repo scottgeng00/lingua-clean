@@ -1,4 +1,5 @@
 .venv/
+.venv-kd/
 __pycache__/
 *.pyc
 slurm-*.out

@@ -136,6 +136,22 @@ def resolve_hf_arch(params, hf_arch_override=None):
     return arch
 
 
+def _write_legacy_config_keys(config_path):
+    """transformers >= 5 nests rope_theta under rope_parameters and renames torch_dtype to
+    dtype; transformers 4.x and vLLM (e.g. the OLMES env) only read the old keys and would
+    silently fall back to their defaults (rope_theta 10000). Write both spellings."""
+    with open(config_path) as f:
+        cfg = json.load(f)
+    rope = cfg.get("rope_parameters") or {}
+    if "rope_theta" not in cfg and "rope_theta" in rope:
+        cfg["rope_theta"] = rope["rope_theta"]
+    if "torch_dtype" not in cfg and "dtype" in cfg:
+        cfg["torch_dtype"] = cfg["dtype"]
+    with open(config_path, "w") as f:
+        json.dump(cfg, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+
 def write_model(
     model_path,
     input_base_path,
@@ -497,6 +513,7 @@ def write_model(
         else:
             print("Saving to disk.")
             model.save_pretrained(model_path, safe_serialization=safe_serialization)
+            _write_legacy_config_keys(os.path.join(model_path, "config.json"))
 
         # Add a text file indicating success
         with open(os.path.join(model_path, "success.txt"), "w") as f:

@@ -77,7 +77,9 @@ from apps.main.transformer import (
 from lingua.probe import AutoProbeD
 from lingua.stool import StoolArgs, launch_job
 
+import transformers
 from transformers import AutoModelForCausalLM
+from lingua.hf_teacher import patch_qwen3_5_packed_conv, teacher_logits_packed
 
 import wandb
 
@@ -2376,10 +2378,16 @@ def train(args: TrainArgs):
         # Load frozen teacher model(s) for on-the-fly delta weighting.
         # teacher_model_paths (list) takes precedence over teacher_model_path (single).
         def _load_teacher_hf(path: str):
+            # transformers >= 4.56 takes `dtype` (5.x dropped `torch_dtype`)
+            _major, _minor = (int(x) for x in transformers.__version__.split(".")[:2])
+            _dtype_kw = "dtype" if (_major, _minor) >= (4, 56) else "torch_dtype"
+            # Qwen3.5 teachers: make the causal conv respect document boundaries in
+            # packed (cu_seqlens) forwards; no-op for other architectures
+            patch_qwen3_5_packed_conv()
             try:
                 model = AutoModelForCausalLM.from_pretrained(
                     path,
-                    torch_dtype=torch.bfloat16,
+                    **{_dtype_kw: torch.bfloat16},
                     attn_implementation="flash_attention_2",
                 )
                 logger.info(f"Teacher load: using flash_attention_2 for {path}")
@@ -2390,7 +2398,7 @@ def train(args: TrainArgs):
                 )
                 model = AutoModelForCausalLM.from_pretrained(
                     path,
-                    torch_dtype=torch.bfloat16,
+                    **{_dtype_kw: torch.bfloat16},
                 )
             model.config.use_cache = False
             model = model.cuda().eval()
@@ -4840,13 +4848,20 @@ def train(args: TrainArgs):
                     logger.info("=" * 60)
             elif use_kl_distillation:
                 # Classic Knowledge Distillation: KL divergence between student and teacher
-                logits = model(input_ids, target=None)
+                logits = model(input_ids, target=None,
+                               cu_seqlens=cu_seqlens_tensor, max_seqlen=max_seqlen)
 
-                # Recompute teacher logits for KL distillation (need full logits, not just NLL)
+                # Recompute teacher logits for KL distillation (need full logits, not just NLL).
+                # With cross-doc attention disabled the teacher is document-masked too.
                 with torch.inference_mode():
-                    teacher_out = teacher_model(input_ids, use_cache=False)
-                    teacher_logits_for_kd = teacher_out.logits
-                    del teacher_out
+                    if cu_seqlens_tensor is not None:
+                        teacher_logits_for_kd = teacher_logits_packed(
+                            teacher_model, input_ids, cu_seqlens_tensor, max_seqlen
+                        )
+                    else:
+                        teacher_out = teacher_model(input_ids, use_cache=False)
+                        teacher_logits_for_kd = teacher_out.logits
+                        del teacher_out
 
                     # Handle vocab size mismatch between student and teacher
                     # Student vocab may be padded to multiple_of (e.g., 100278 → 100352)
