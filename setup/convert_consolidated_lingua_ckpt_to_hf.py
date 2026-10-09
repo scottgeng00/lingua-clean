@@ -207,6 +207,10 @@ def write_model(
         # bos may legitimately be None (e.g. Qwen tokenizers)
         assert eos_token_id is not None, "Eos token id is not set"
         tokenizer_vocab_size = len(tokenizer)
+        if params.get('weight_tying', False):
+            # tied models: the output projection is the embedding (checkpoints from before
+            # the tied-weight fix also carry an untrained `output.weight`; ignore it)
+            loaded['output.weight'] = loaded['tok_embeddings.weight']
         model_vocab_size = loaded['output.weight'].shape[0]
         embed_vocab_size = loaded['tok_embeddings.weight'].shape[0]
 

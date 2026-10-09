@@ -207,7 +207,8 @@ def write_model(
         state_dict = {
             "model.embed_tokens.weight": loaded["tok_embeddings.weight"],
             "model.norm.weight": loaded["norm.weight"],
-            "lm_head.weight": loaded["output.weight"],
+            # tied models have no trained output.weight; the head is the embedding
+            "lm_head.weight": loaded["tok_embeddings.weight"] if params.get("weight_tying") else loaded["output.weight"],
         }
 
         for k, v in state_dict.items():

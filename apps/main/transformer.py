@@ -151,7 +151,10 @@ class LMTransformer(BaseTransformer):
                 bias=False,
         )
         if args.weight_tying:
-            self.output.weight = self.tok_embeddings.weight
+            # TiedLinear reads tok_embeddings.weight; there is no separate output.weight.
+            # Checkpoints from before this change also stored an `output.weight` (FSDP had
+            # made it a separate, never-trained copy); drop it when loading them.
+            self.register_load_state_dict_pre_hook(_drop_legacy_tied_output_weight)
 
         self.init_weights()
 
@@ -217,6 +220,10 @@ def get_no_recompute_ops():
 
 
 # Optional and only used for fully shard options (fsdp) is choose. Highly recommanded for large models
+def _drop_legacy_tied_output_weight(module, state_dict, prefix, *args):
+    state_dict.pop(prefix + "output.weight", None)
+
+
 def build_fsdp_grouping_plan(model_args: LMTransformerArgs):
     group_plan: Tuple[int, bool] = []
 

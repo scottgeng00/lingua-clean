@@ -268,8 +268,7 @@ def convert_qwen(model, output_dir, tokenizer_path):
             value = inverse_permute_norm(value, n_heads=1)  # per-head norm of size head_dim
         out[new_key] = value.clone()
     if tied:
-        # LMTransformer's tied head registers the shared embedding under all three names.
-        out["output.weight"] = out["tok_embeddings.weight"]
+        # LMTransformer's tied head reaches the embedding as output.tied_module.weight too.
         out["output.tied_module.weight"] = out["tok_embeddings.weight"]
 
     # FFN width: lingua computes round_up(ffn_dim_multiplier * int(8*dim/3), multiple_of);

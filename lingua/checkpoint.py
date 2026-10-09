@@ -288,6 +288,21 @@ class CheckpointManager:
             model=model,
             optimizer=optimizer,
         )
+        # get_state_dict() on a fresh optimizer creates state for every parameter, but
+        # parameters that never received a gradient have no optimizer state in the
+        # checkpoint (e.g. the untrained duplicate `output.weight` that tied models had
+        # before apps/main/transformer.py stopped registering it). Don't ask dcp for
+        # entries that were never saved; a partially missing parameter still fails.
+        saved_keys = dcp.FileSystemReader(str(path)).read_metadata().state_dict_metadata
+        optim_state = state_dict["optim"].get("state", {})
+        never_saved = [
+            fqn for fqn, param_state in optim_state.items()
+            if not any(f"optim.state.{fqn}.{k}" in saved_keys for k in param_state)
+        ]
+        for fqn in never_saved:
+            del optim_state[fqn]
+        if never_saved:
+            logger.warning(f"No optimizer state in checkpoint for (never-updated) params: {never_saved}")
         dcp.load(state_dict, checkpoint_id=path)
         logger.info("Model and optim reloaded")
     
