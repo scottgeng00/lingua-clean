@@ -2,8 +2,9 @@
 
 import contextlib
 from copy import deepcopy
-from functools import partial
+from functools import lru_cache, partial
 import json
+import zlib
 from dataclasses import dataclass, field
 from multiprocessing import Process, Queue, Event
 from queue import Full, Empty
@@ -70,6 +71,12 @@ class JSONLState(TypedDict):
         window (int): The window size used for iteration.
         offset (int): The offset used for iteration.
         current_iter (Optional[int]): Number of iterations over the jsonl file (for infinite iteration).
+        line_idx (int): Sequential epochs: absolute index of the next line of the file.
+            Shuffled epochs: index into this epoch's permutation of the reader's lines.
+        max_lines (Optional[int]): Only the first max_lines lines of the file are used (an
+            epoch ends there); None = whole file. Set from DataArgs.source_max_docs.
+        shuffle (bool): Read epochs >= 1 in a fresh seeded permutation (DataArgs.shuffle_each_epoch).
+        shuffle_seed (int): Seed for those permutations.
     """
 
     file_path: str
@@ -77,6 +84,10 @@ class JSONLState(TypedDict):
     block_size: int
     offset: int
     current_iter: int
+    line_idx: int
+    max_lines: Optional[int]
+    shuffle: bool
+    shuffle_seed: int
 
 
 class MultiChoiceState(TypedDict):
@@ -147,59 +158,117 @@ class PrefetchState(TypedDict):
     batch_size: int
 
 
+def _jsonl_state(file_path, position, block_size, offset, current_iter, line_idx, max_lines, shuffle, shuffle_seed):
+    return JSONLState(
+        file_path=file_path,
+        position=position,
+        block_size=block_size,
+        offset=offset,
+        current_iter=current_iter,
+        line_idx=line_idx,
+        max_lines=max_lines,
+        shuffle=shuffle,
+        shuffle_seed=shuffle_seed,
+    )
+
+
+@lru_cache(maxsize=None)
+def _reader_line_offsets(file_path: str, block_size: int, offset: int, max_lines: Optional[int]) -> np.ndarray:
+    """Byte offsets of the lines this reader owns (line i with i % block_size == offset),
+    among the first `max_lines` complete lines of the file. Built once per process."""
+    starts = [np.zeros(1, dtype=np.int64)]
+    n_found, pos = 0, 0
+    with open(file_path, "rb", buffering=0) as f:
+        while max_lines is None or n_found < max_lines:
+            block = f.read(64 << 20)
+            if not block:
+                break
+            nl = np.flatnonzero(np.frombuffer(block, dtype=np.uint8) == 10).astype(np.int64) + pos + 1
+            starts.append(nl)
+            n_found += len(nl)
+            pos += len(block)
+    line_starts = np.concatenate(starts)[:-1]  # start of every complete line (last entry = EOF)
+    if max_lines is not None:
+        line_starts = line_starts[:max_lines]
+    return line_starts[offset::block_size]
+
+
 def read_jsonl(
     file_path: str,
     position: int,
     block_size: int,
     offset: int,
     current_iter: int,
+    line_idx: Optional[int] = None,
+    max_lines: Optional[int] = None,
+    shuffle: bool = False,
+    shuffle_seed: int = 0,
 ):
     """Iterates over a JSON Lines file, yielding a line every `block_size` lines with an offset
 
     Example : If block_size = 3, offset = 1, iterator will yield lines 1 4 7 10 ...
     Example : If block_size = 2, offset = 0, iterator will yield lines 0 2 4 6 ...
 
+    Only the first `max_lines` lines are used when it is set. With `shuffle`, epochs
+    after the first (current_iter >= 1) visit this reader's lines in a permutation
+    seeded by (shuffle_seed, file name, offset, epoch); the first epoch is read in file
+    order (prepared data is already shuffled).
+
     Args:
         file_path (str): Path to the JSONL file.
-        position (int): The file position (in bytes) from which to start reading.
+        position (int): The file position (in bytes) from which to start reading (sequential epochs).
         block_size (int): The number of lines to skip between yields
         offset (int): The initial number of lines skiped
+        line_idx (int): See JSONLState; None = legacy state without it.
 
     Yields:
         JSONLState: Represents the state of each line read according to window and offset.
     """
     if (offset < 0) or (offset >= block_size):
         raise RuntimeError(f"JSONL iterator offset value is invalid")
-    # We assume the start position is either 0 or given by the last line yielded
-    # Therefore the current line is right after the offset (modulo block_size)
-    current_line = offset + 1 if position > 0 else 0
 
-    state = JSONLState(
-        file_path=file_path,
-        position=position,
-        block_size=block_size,
-        offset=offset,
-        current_iter=current_iter,
-    )
+    def state(position, line_idx):
+        return _jsonl_state(file_path, position, block_size, offset, current_iter,
+                            line_idx, max_lines, shuffle, shuffle_seed)
+
+    if shuffle and current_iter >= 1:
+        offsets = _reader_line_offsets(file_path, block_size, offset, max_lines)
+        seed = (shuffle_seed, zlib.crc32(os.path.basename(file_path).encode()), offset, current_iter)
+        perm = np.random.default_rng(seed).permutation(len(offsets))
+        with open(file_path, "rb") as file:
+            for k in range(line_idx or 0, len(perm)):
+                file.seek(int(offsets[perm[k]]))
+                line = file.readline()
+                try:
+                    content = json.loads(line.decode("utf-8", errors="ignore"))
+                except json.JSONDecodeError:
+                    continue
+                yield content, state(0, k + 1)
+        return
+
+    # Sequential epoch. `idx` counts the lines read from the start of the file.
+    if line_idx is None:
+        # Legacy state: only the line number modulo block_size is known, which is
+        # all that matters without max_lines.
+        line_idx = offset + 1 if position > 0 else 0
+    idx = line_idx
     with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
         file.seek(position)
-        while line := file.readline():
-            current_line += 1
-            if (current_line - 1) % block_size == offset:
-                # We return state that will allow resuming from this position
-                # We update state for next position
-                state = JSONLState(
-                    file_path=file_path,
-                    position=file.tell(),
-                    block_size=block_size,
-                    offset=offset,
-                    current_iter=current_iter,
-                )
+        while max_lines is None or idx < max_lines:
+            line = file.readline()
+            if not line:
+                if max_lines is not None:
+                    logger.warning(f"[data] {file_path} has only {idx} lines, fewer than max_lines={max_lines}")
+                break
+            idx += 1
+            if (idx - 1) % block_size == offset:
                 try:
-                    yield json.loads(line), state
+                    content = json.loads(line)
                 except json.JSONDecodeError:
                     # Skip malformed lines (can happen with shuffled data)
                     continue
+                # We return state that will allow resuming from this position
+                yield content, state(file.tell(), idx)
 
 
 def loop_on_jsonl(
@@ -208,17 +277,31 @@ def loop_on_jsonl(
     block_size: int,
     offset: int,
     current_iter: int,
+    line_idx: Optional[int] = None,
+    max_lines: Optional[int] = None,
+    shuffle: bool = False,
+    shuffle_seed: int = 0,
 ):
     """Makes the block jsonl iterator infinite and updates n_iter counter"""
+    it = None
     try:
         while True:
-            it = read_jsonl(file_path, position, block_size, offset, current_iter)
+            it = read_jsonl(file_path, position, block_size, offset, current_iter,
+                            line_idx, max_lines, shuffle, shuffle_seed)
+            n = 0
             for content, jsonl_state in it:
+                n += 1
                 yield content, jsonl_state
+            if n == 0 and (line_idx in (None, 0)) and position == 0:
+                raise RuntimeError(f"{file_path} (offset {offset}/{block_size}, max_lines={max_lines}) yields no lines")
+            logger.info(f"[data] finished epoch {current_iter} of {os.path.basename(file_path)} "
+                        f"(reader {offset}/{block_size}, max_lines={max_lines}, shuffle={shuffle})")
             current_iter += 1
             position = 0
+            line_idx = 0
     finally:
-        it.close()
+        if it is not None:
+            it.close()
 
 
 def filter_by_delta(
@@ -1136,26 +1219,42 @@ def find_and_sanitize_chunks(dataset_path: str, world_size: int, file_pattern: s
     return dataset_chunks
 
 
-def distribute_data_to_rank(dataset_path: str, rank: int, world_size: int, file_pattern: str):
+def distribute_data_to_rank(
+    dataset_path: str,
+    rank: int,
+    world_size: int,
+    file_pattern: str,
+    max_docs: Optional[int] = None,
+    shuffle: bool = False,
+    shuffle_seed: int = 0,
+):
     """
     Distributes the chunk files in a dataset path to each worker.
     If world_size is smaller than the number of chunks, the extra chunks are discarded.
     Otherwise, world_size is assumed to be a multiple of number of chunks.
     In that case there are world_size//nb_chunks workers on each chunk file, reading with different offsets.
+
+    With `max_docs`, only the first max_docs documents of the source are used: each
+    chunk contributes a prefix of max_docs // n_chunks lines (the remainder goes to the
+    first chunks in sorted order). The subset is the same for every run and nested
+    across max_docs values; for globally shuffled chunks it is a uniform random subset,
+    and for rows round-robined over chunks it is exactly the first max_docs rows.
     """
     dataset_chunks = find_and_sanitize_chunks(dataset_path, world_size, file_pattern)
     n_ranks_per_chunk = world_size // len(dataset_chunks)
+    sorted_chunks = sorted(dataset_chunks)
+    if max_docs is not None:
+        if max_docs < len(dataset_chunks):
+            raise ValueError(f"source_max_docs={max_docs} for {dataset_path} is below the number of chunks ({len(dataset_chunks)})")
+        base, extra = divmod(max_docs, len(dataset_chunks))
     rank_to_jsonl_iterator_params = []
     for chunk_path in dataset_chunks:
+        max_lines = None
+        if max_docs is not None:
+            max_lines = base + (1 if sorted_chunks.index(chunk_path) < extra else 0)
         for i in range(n_ranks_per_chunk):
             rank_to_jsonl_iterator_params.append(
-                JSONLState(
-                    file_path=chunk_path,
-                    position=0,
-                    block_size=n_ranks_per_chunk,
-                    offset=i,
-                    current_iter=0,
-                )
+                _jsonl_state(chunk_path, 0, n_ranks_per_chunk, i, 0, 0, max_lines, shuffle, shuffle_seed)
             )
 
     return rank_to_jsonl_iterator_params[rank]
@@ -1168,11 +1267,20 @@ def init_choice_state(
     rank: int,
     world_size: int,
     file_pattern: str,
+    source_max_docs: Optional[Dict[str, int]] = None,
+    shuffle_each_epoch: bool = False,
 ):
+    source_max_docs = dict(source_max_docs or {})
+    unknown = set(source_max_docs) - set(sources)
+    if unknown:
+        raise ValueError(f"source_max_docs has sources not in data.sources: {sorted(unknown)}")
     data_path_to_jsonl_state = dict()
     for dataset_path in sources:
         jsonl_state = distribute_data_to_rank(
-            os.path.join(root_dir, dataset_path), rank, world_size, file_pattern
+            os.path.join(root_dir, dataset_path), rank, world_size, file_pattern,
+            max_docs=source_max_docs.get(dataset_path),
+            shuffle=shuffle_each_epoch,
+            shuffle_seed=seed,
         )
         data_path_to_jsonl_state[dataset_path] = jsonl_state
 
@@ -1212,9 +1320,12 @@ def init_state(
     nll_field: Optional[str] = None,
     entropy_field: Optional[str] = None,
     margin_field: Optional[str] = None,
+    source_max_docs: Optional[Dict[str, int]] = None,
+    shuffle_each_epoch: bool = False,
 ):
     multi_choice_state = init_choice_state(
-        root_dir=root_dir, sources=sources, seed=seed, rank=rank, world_size=world_size, file_pattern=file_pattern
+        root_dir=root_dir, sources=sources, seed=seed, rank=rank, world_size=world_size, file_pattern=file_pattern,
+        source_max_docs=source_max_docs, shuffle_each_epoch=shuffle_each_epoch,
     )
 
     # RNG for synth context probability sampling (use different seed offset)
@@ -1270,6 +1381,11 @@ def setup_sources(multi_state):
             jsonl_state["block_size"],
             jsonl_state["offset"],
             jsonl_state["current_iter"],
+            # absent in states saved before these fields existed
+            jsonl_state.get("line_idx"),
+            jsonl_state.get("max_lines"),
+            jsonl_state.get("shuffle", False),
+            jsonl_state.get("shuffle_seed", 0),
         )
 
     return path_to_iter
@@ -1427,6 +1543,11 @@ class DataArgs:
     prefetch_size: int = 64
     tokenizer: TokenizerArgs = field(default_factory=TokenizerArgs)
     max_length: Optional[int] = None  # max sequence length for tokenization
+    # Use only the first N documents of a source (uniform random subset of a prepared,
+    # shuffled source; nested across N). Sources past their N docs repeat (epochs).
+    source_max_docs: Dict[str, int] = field(default_factory=dict)
+    # Read every epoch after the first in a fresh seeded permutation instead of file order.
+    shuffle_each_epoch: bool = False
 
     # Synthetic context (kept for orig_data compatibility)
     synth_context_mode: Optional[str] = None
@@ -1560,6 +1681,8 @@ def init_dataloader_state_from_args(
         nll_field=args.teacher_logprob_field,
         entropy_field=args.teacher_entropy_field,
         margin_field=args.teacher_margin_field,
+        source_max_docs=args.source_max_docs,
+        shuffle_each_epoch=args.shuffle_each_epoch,
     )
 
 
