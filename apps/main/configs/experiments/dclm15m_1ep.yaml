@@ -1,0 +1,143 @@
+# Data-repetition experiment: 15M DCLM docs, ~1.07 epochs (all-real baseline).
+#
+# Data: /home/sgeng/scottg/pretrain/assets/data/rewrite_splits (dataset.json there). dclm_15m is
+# the first 15M DCLM docs; qwen35_{27b,2b}_rephrase are rewrites of the same docs,
+# row-aligned (row i has the same id in all three). Rows are round-robined over 16
+# chunks, so data.source_max_docs (a per-chunk prefix) selects exactly the first N
+# rows, and the same rows for every source. Every epoch reads them in the same order.
+#
+# Budget: 19074 steps x 256 x 4096 = 20.0B tokens for every experiment (as
+# qwen3_dclm_pretrain). Data sizes in Qwen3 tokens incl. EOS, estimated from a 1-in-20
+# sample: DCLM 15M docs = 18.76B, 7.5M = 9.35B, 3.75M = 4.68B; rewrites of the first
+# 7.5M = 6.02B (27b) / 6.04B (2b).
+#
+# Model (Qwen3-0.6B shape), optimizer and evals are those of qwen3_dclm_pretrain.yaml.
+# Global batch 256 seqs x 4096 tok: 4 nodes = 32 GPUs x 8 seq/GPU, no grad accumulation
+# (2 ranks per chunk). Validation uses the six Dolmino *.val.jsonl sets (1000 docs each).
+name: qwen3-0p6b-dclm15m-1ep
+dump_dir: ${oc.env:MIDTRAIN_ROOT}/experiments/dclm15m_1ep
+steps: 19074
+probe_freq: null
+seed: 777
+grad_acc_steps: 1
+
+optim:
+  lr: 2.65e-3
+  weight_decay: 0.05
+  warmup: 954                 # ~1B tokens at 256 x 4096 per step
+  lr_min_ratio: 0.01
+  clip: 1.0
+  beta1: 0.9
+  beta2: 0.95
+  scheduler: cosine
+
+distributed:
+  fsdp_type: full_shard
+  compile: true
+  model_dtype: bf16
+  matmul_allow_tf32: true
+  selective_activation_checkpointing: false
+  tp_size: 1
+
+# Qwen3-0.6B shape.
+model:
+  dim: 1024
+  n_layers: 28
+  n_heads: 16
+  n_kv_heads: 8
+  head_dim: 128
+  ffn_dim_multiplier: 1.125   # round_up(1.125 * int(8*1024/3), 256) = 3072
+  multiple_of: 256
+  norm_eps: 1e-6
+  rope_theta: 1000000
+  max_seqlen: 4096
+  weight_tying: true
+  qk_norm: true
+  qk_norm_per_head: true
+  post_norm: false
+  hf_arch: Qwen3ForCausalLM
+  init_base_std: 0.02
+
+checkpoint:
+  init_ckpt_path: null
+  dump:
+    every: 1000
+    keep: -1
+  eval:
+    every: 1000
+    keep: -1
+
+data:
+  root_dir: /home/sgeng/scottg/pretrain/assets/data/rewrite_splits
+  batch_size: 8
+  prefetch_size: 64
+  seq_len: 4096
+  n_views: 2
+  load_async: true
+  add_bos: false              # Qwen tokenizer has no BOS token
+  add_eos: true               # <|endoftext|> between documents
+  disable_cross_doc_attn: true
+  sources:
+    dclm_15m: 1.0
+  source_max_docs:
+    dclm_15m: 15000000
+  tokenizer:
+    name: hf
+    path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base
+
+profiling:
+  run: false
+
+logging:
+  freq: 10
+  wandb:
+    project: "lingua-clean-pretrain"
+    entity: ${oc.env:WANDB_ENTITY,null}
+    resume: allow
+
+# Async eval every checkpoint: OLMES base-model tasks (vLLM, in $OLMES_CONDA_ENV;
+# the checkpoint is exported as Qwen3ForCausalLM first) plus held-out perplexity
+# on each of the six Dolmino sources (<source>/*.val.jsonl, 1000 docs each).
+async_eval_gpus: 2              # eval_olmes splits the OLMES tasks across both GPUs
+eval_backend: olmes
+eval:
+  dump_dir: ${oc.env:EVAL_ROOT}/slurm_eval_logs
+  generator:
+    # tokens packed per forward pass for validation (docs are truncated to the
+    # model's 4096-token context). 32768 was ~3x faster but ~10% of eval jobs
+    # segfaulted mid-validation (0 of 45 at 4096), losing that checkpoint's evals.
+    max_tokens: 4096
+    temperature: 0.0
+    dtype: bf16
+  harness: null
+  olmes:
+    tasks:
+      # Accuracy: rank classification (likelihood of each option's text, per-char
+      # normalized) for the MC tasks, as in OLMo 3's small-scale base evals. RC
+      # tasks also report bits_per_byte_corr (gold-answer BPB) from the same
+      # requests, so no separate :bpb tasks are needed for them.
+      - sciq:rc::olmo3
+      - mmlu:rc::olmes
+      - arc_easy:rc::olmes:full
+      - piqa:rc::olmes:full
+      # Generative: gsm8k 8-shot CoT (exact match), triviaqa 5-shot (F1).
+      - gsm8k::olmes
+      - triviaqa::olmes
+      # Generative tasks need a separate pass for gold-answer BPB (no generation).
+      - gsm8k:bpb::olmes
+      - triviaqa:bpb::olmes
+      # Code: gold-solution BPB only, as in OLMo 3's small-scale code eval (pass@1
+      # is ~0 for a 0.6B model with little code data and needs code execution).
+      - mbpp:3shot:bpb::none
+    model_type: vllm
+    tokenizer_path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base
+    tokenizer_revision: main
+    max_length: 4096
+    gpu_memory_utilization: 0.8
+    trust_remote_code: true
+    olmes_env: ${oc.env:OLMES_CONDA_ENV}
+  validation:
+    max_steps: 1000
+    use_val_from_train_src: false   # training sources have no val split
+    root_dir: ${oc.env:DATA_ROOT}
+    sources: [dclm_shuffled, math_shuffled, flan_shuffled, wiki_shuffled, pes2o_shuffled, stackexchange_shuffled]

@@ -14,7 +14,8 @@
 #   CONFIG=dolmino_pretrain DRY_RUN=1 bash scripts/launch_pretrain.sh      # print sbatch
 #
 # Environment overrides:
-#   CONFIG=<name>           default `dolmino_pretrain`. Resolves to apps/main/configs/<CONFIG>.yaml.
+#   CONFIG=<name>           default `dolmino_pretrain`. Resolves to apps/main/configs/<CONFIG>.yaml
+#                           (may be a subpath, e.g. experiments/dclm7p5m_2ep).
 #   NNODES=<int>            default 2 (matches the original pretrain_from_scratch_run.sh).
 #   STEPS_OVERRIDE=<int>    default 9600 (~26B Dolmino tokens at the configured batch/seq).
 #   DRY_RUN=0|1             if 1, print the sbatch command and exit.
@@ -47,7 +48,7 @@ LINGUA_COMPILE_TEACHER=0
 SLURM_LOG_DIR="${SLURM_LOG_DIR:-${HOME}/lingua-runs/slurm_logs}"
 mkdir -p "${SLURM_LOG_DIR}"
 
-JOBNAME="lingua_clean_pt_${CONFIG}"
+JOBNAME="lingua_clean_pt_${CONFIG//\//_}"   # CONFIG may be a subpath (experiments/<name>)
 
 SBATCH_CMD=(
     sbatch
