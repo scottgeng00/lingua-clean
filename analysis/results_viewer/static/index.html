@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lingua-clean results</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="viz-root">
+<header class="topbar">
+  <h1>lingua-clean results</h1>
+  <span id="stamp" class="muted"></span>
+  <span class="spacer"></span>
+  <button id="refresh" type="button" title="Re-read all run directories">Refresh</button>
+  <button id="theme" type="button" title="Theme: auto / light / dark">Theme: auto</button>
+</header>
+
+<div class="layout">
+  <aside id="sidebar" aria-label="Runs"></aside>
+
+  <main id="main">
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="val">Validation</button>
+      <button role="tab" data-tab="downstream">Downstream</button>
+      <button role="tab" data-tab="train">Training</button>
+      <button role="tab" data-tab="table">Table</button>
+    </nav>
+    <div id="filters" class="filters"></div>
+    <div id="legend" class="legend" aria-label="Legend"></div>
+    <p id="note" class="note muted"></p>
+    <section id="view"></section>
+  </main>
+</div>
+
+<div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

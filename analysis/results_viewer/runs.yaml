@@ -1,0 +1,39 @@
+# Runs shown in the results viewer, grouped into experiment groups.
+#
+# root:     directory that run `dir`s are relative to (${MIDTRAIN_ROOT} if set).
+# Per run:
+#   id      stable key (used in URLs / selections)
+#   label   display name
+#   dir     run dump_dir, relative to root (or absolute)
+#   val     validation-metrics file relative to dir (default metrics.validation.jsonl).
+#           The qwen3 baselines point at their val1000/ re-evaluation so every run is
+#           scored on the same 1000-docs-per-domain Dolmino val sets.
+#   color   categorical slot 1-8. Fixed per run so a run keeps its color in every
+#           view and selection; slots must be unique across runs shown together.
+#
+# OLMES results are picked up from <dir>/{evals,olmes_base,olmes}/<step>/olmes_results/.
+
+root: /checkpoint/dream-sc-3/scottg/pretrain/lingua-runs/runs/midtrain
+
+groups:
+  - id: data_repetition
+    title: Data repetition (20B tokens)
+    description: >
+      Qwen3-0.6B from scratch for 19,074 steps (20.0B tokens) on prefixes of the first
+      15M DCLM docs, repeated as needed, or a 7.5M prefix mixed 50/50 per document with
+      Qwen3.5 rewrites of the same docs. Configs: apps/main/configs/experiments/.
+    runs:
+      - {id: dclm15m_1ep,    label: "DCLM 15M docs (×1.07)",    dir: experiments/dclm15m_1ep,    color: 1}
+      - {id: dclm7p5m_2ep,   label: "DCLM 7.5M docs (×2.1)",    dir: experiments/dclm7p5m_2ep,   color: 2}
+      - {id: dclm3p75m_4ep,  label: "DCLM 3.75M docs (×4.3)",   dir: experiments/dclm3p75m_4ep,  color: 3}
+      - {id: dclm7p5m_rw27b, label: "DCLM 7.5M + 27B rewrites", dir: experiments/dclm7p5m_rw27b, color: 4}
+      - {id: dclm7p5m_rw2b,  label: "DCLM 7.5M + 2B rewrites",  dir: experiments/dclm7p5m_rw2b,  color: 5}
+
+  - id: qwen3_baselines
+    title: Qwen3-0.6B baselines
+    description: >
+      Dolmino mix (24.1B tokens, apps/main/configs/qwen3_pretrain.yaml) vs DCLM only
+      (20.0B tokens, qwen3_dclm_pretrain.yaml). Validation re-scored on the 1000-doc sets.
+    runs:
+      - {id: qwen3_mix,  label: "Dolmino mix (24.1B)", dir: qwen3_pretrain,      val: val1000/metrics.validation.jsonl, color: 6}
+      - {id: qwen3_dclm, label: "DCLM only (20B)",     dir: qwen3_dclm_pretrain, val: val1000/metrics.validation.jsonl, color: 7}
