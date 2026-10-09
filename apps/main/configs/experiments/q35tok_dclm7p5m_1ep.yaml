@@ -1,6 +1,7 @@
 # Expert-distillation experiment: first 7.5M DCLM docs, one epoch, Qwen3.5 tokenizer.
 # CE baseline for the Qwen3.5-2B distillation runs; runs on the same stack as them
-# (LINGUA_VENV=$PWD/.venv-kd, see bin/install_kd_requirements.sh).
+# (LINGUA_VENV=$PWD/.venv-kd, see bin/install_kd_requirements.sh); evals on the main venv
+# (LINGUA_EVAL_VENV=$PWD/.venv; lingua's eval generator fails on torch 2.8).
 #
 # Tokenizer: Qwen3.5 (Qwen/Qwen3.5-2B, 248,077 tokens; eos set to <|endoftext|>, see
 # assets/models/Qwen3.5-2B-tokenizer-eot/README.md) instead of Qwen3's, so the student can be

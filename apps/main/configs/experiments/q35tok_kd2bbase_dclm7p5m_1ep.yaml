@@ -2,8 +2,9 @@
 # Qwen/Qwen3.5-2B-Base.
 # Loss = 0.5 * KL(teacher || student) (T=1, full 248k vocab) + 0.5 * CE on the data.
 # The online teacher sees the same document-masked packed batches as the student
-# (lingua/hf_teacher.py). Needs .venv-kd (bin/install_kd_requirements.sh): launch with
-# LINGUA_VENV=$PWD/.venv-kd. CE baseline: q35tok_dclm7p5m_1ep.yaml.
+# (lingua/hf_teacher.py). Trains on .venv-kd (bin/install_kd_requirements.sh), evals on
+# the main venv (lingua's eval generator fails on torch 2.8): launch with
+# LINGUA_VENV=$PWD/.venv-kd LINGUA_EVAL_VENV=$PWD/.venv. CE baseline: q35tok_dclm7p5m_1ep.yaml.
 #
 # Tokenizer: Qwen3.5 (Qwen/Qwen3.5-2B, 248,077 tokens; eos set to <|endoftext|>, see
 # assets/models/Qwen3.5-2B-tokenizer-eot/README.md) instead of Qwen3's, so the student can be

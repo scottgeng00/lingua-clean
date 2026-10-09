@@ -7560,7 +7560,9 @@ def train(args: TrainArgs):
                                 tasks_per_node=1 if eval_backend == "olmes" else None,
                                 override=False,
                                 dirs_exists_ok=True,
-                                anaconda=os.environ.get("LINGUA_VENV", "default"),
+                                # evals can use a different env than training (e.g. train on
+                                # .venv-kd for a transformers-5 teacher, evaluate on .venv)
+                                anaconda=os.environ.get("LINGUA_EVAL_VENV") or os.environ.get("LINGUA_VENV", "default"),
                             )
                         )
 
