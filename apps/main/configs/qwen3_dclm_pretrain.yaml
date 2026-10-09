@@ -105,9 +105,10 @@ eval_backend: olmes
 eval:
   dump_dir: ${oc.env:EVAL_ROOT}/slurm_eval_logs
   generator:
-    # tokens packed per forward pass for validation; docs are still truncated to
-    # the model's 4096-token context. 4096 left a 0.6B model mostly idle.
-    max_tokens: 32768
+    # tokens packed per forward pass for validation (docs are truncated to the
+    # model's 4096-token context). 32768 was ~3x faster but ~10% of eval jobs
+    # segfaulted mid-validation (0 of 45 at 4096), losing that checkpoint's evals.
+    max_tokens: 4096
     temperature: 0.0
     dtype: bf16
   harness: null
