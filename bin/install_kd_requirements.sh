@@ -39,7 +39,7 @@ uv pip install --python "$VENV/bin/python" \
     -r "$REQ" \
     "torch==2.8.0" "xformers==0.0.32.post2" \
     "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl" \
-    "transformers==5.19.0" "flash-linear-attention==0.5.2"
+    "transformers==5.19.0" "flash-linear-attention==0.5.2" accelerate
 
 SITE="$("$VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 cat > "$SITE/sitecustomize.py" <<'PY'

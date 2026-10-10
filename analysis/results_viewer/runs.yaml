@@ -52,3 +52,32 @@ groups:
       - {id: q35tok_kd2bbase_dclm7p5m_2ep, label: "KD 2B-Base, 20B",        dir: experiments/q35tok_kd2bbase_dclm7p5m_2ep, color: 4}
       - {id: q35tok_kd2binst_dclm7p5m_1ep, label: "KD 2B post-trained, 1x", dir: experiments/q35tok_kd2binst_dclm7p5m_1ep, color: 5}
       - {id: q35tok_kd2binst_dclm7p5m_2ep, label: "KD 2B post-trained, 20B", dir: experiments/q35tok_kd2binst_dclm7p5m_2ep, color: 6}
+      - {id: q35tok_kd27b_dclm7p5m_2ep,    label: "KD 27B post-trained, 20B", dir: experiments/q35tok_kd27b_dclm7p5m_2ep,  color: 7}
+
+  - id: rephrase_wd005
+    title: Rewrites vs repetition (weight decay 0.05)
+    description: >
+      20B tokens on the first 1.875M (or 0.9375M) DCLM docs: repeated (~8x / ~16x) vs adding 7 (or 15)
+      Qwen3.5-2B or -27B rephrases per doc (simplescale g16-2m). Same colours mark the same condition
+      in both weight-decay groups.
+    runs:
+      - {id: n1875k_real_wd005,     label: "1.875M real, ~8x (0.05)",       dir: experiments/rephrase/n1875k_real_wd005,     color: 1}
+      - {id: n1875k_rw2b_k7_wd005,  label: "1.875M + 7 rw 2B (0.05)",       dir: experiments/rephrase/n1875k_rw2b_k7_wd005,  color: 2}
+      - {id: n1875k_rw27b_k7_wd005, label: "1.875M + 7 rw 27B (0.05)",      dir: experiments/rephrase/n1875k_rw27b_k7_wd005, color: 3}
+      - {id: n937k_real_wd005,      label: "0.94M real, ~16x (0.05)",       dir: experiments/rephrase/n937k_real_wd005,      color: 4}
+      - {id: n937k_rw2b_k15_wd005,  label: "0.94M + 15 rw 2B (0.05)",       dir: experiments/rephrase/n937k_rw2b_k15_wd005,  color: 5}
+      - {id: n937k_rw27b_k15_wd005, label: "0.94M + 15 rw 27B (0.05)",      dir: experiments/rephrase/n937k_rw27b_k15_wd005, color: 6}
+
+  - id: rephrase_wd2
+    title: Rewrites vs repetition (weight decay 2.0)
+    description: >
+      20B tokens on the first 1.875M (or 0.9375M) DCLM docs: repeated (~8x / ~16x) vs adding 7 (or 15)
+      Qwen3.5-2B or -27B rephrases per doc (simplescale g16-2m). Same colours mark the same condition
+      in both weight-decay groups.
+    runs:
+      - {id: n1875k_real_wd2,     label: "1.875M real, ~8x (2.0)",       dir: experiments/rephrase/n1875k_real_wd2,     color: 1}
+      - {id: n1875k_rw2b_k7_wd2,  label: "1.875M + 7 rw 2B (2.0)",       dir: experiments/rephrase/n1875k_rw2b_k7_wd2,  color: 2}
+      - {id: n1875k_rw27b_k7_wd2, label: "1.875M + 7 rw 27B (2.0)",      dir: experiments/rephrase/n1875k_rw27b_k7_wd2, color: 3}
+      - {id: n937k_real_wd2,      label: "0.94M real, ~16x (2.0)",       dir: experiments/rephrase/n937k_real_wd2,      color: 4}
+      - {id: n937k_rw2b_k15_wd2,  label: "0.94M + 15 rw 2B (2.0)",       dir: experiments/rephrase/n937k_rw2b_k15_wd2,  color: 5}
+      - {id: n937k_rw27b_k15_wd2, label: "0.94M + 15 rw 27B (2.0)",      dir: experiments/rephrase/n937k_rw27b_k15_wd2, color: 6}
