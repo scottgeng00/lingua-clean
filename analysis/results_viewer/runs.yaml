@@ -81,3 +81,40 @@ groups:
       - {id: n937k_real_wd2,      label: "0.94M real, ~16x (2.0)",       dir: experiments/rephrase/n937k_real_wd2,      color: 4}
       - {id: n937k_rw2b_k15_wd2,  label: "0.94M + 15 rw 2B (2.0)",       dir: experiments/rephrase/n937k_rw2b_k15_wd2,  color: 5}
       - {id: n937k_rw27b_k15_wd2, label: "0.94M + 15 rw 27B (2.0)",      dir: experiments/rephrase/n937k_rw27b_k15_wd2, color: 6}
+
+  - id: wd_sweep_n1875k
+    title: Weight decay sweep, 1.875M real docs (~8.5x)
+    description: >
+      20B tokens on the first 1.875M DCLM docs, repeated; only weight decay changes (applied to
+      all parameters, as in lingua's AdamW).
+    runs:
+      - {id: n1875k_real_wd005_s, label: "wd 0.05", dir: experiments/rephrase/n1875k_real_wd005, color: 1}
+      - {id: n1875k_real_wd02,    label: "wd 0.2",  dir: experiments/rephrase/n1875k_real_wd02,  color: 2}
+      - {id: n1875k_real_wd05,    label: "wd 0.5",  dir: experiments/rephrase/n1875k_real_wd05,  color: 3}
+      - {id: n1875k_real_wd1,     label: "wd 1.0",  dir: experiments/rephrase/n1875k_real_wd1,   color: 4}
+      - {id: n1875k_real_wd2_s,   label: "wd 2.0",  dir: experiments/rephrase/n1875k_real_wd2,   color: 5}
+
+  - id: wd_sweep_n937k
+    title: Weight decay sweep, 0.94M real docs (~17x)
+    description: >
+      20B tokens on the first 937,500 DCLM docs, repeated; only weight decay changes.
+    runs:
+      - {id: n937k_real_wd005_s, label: "wd 0.05", dir: experiments/rephrase/n937k_real_wd005, color: 1}
+      - {id: n937k_real_wd02,    label: "wd 0.2",  dir: experiments/rephrase/n937k_real_wd02,  color: 2}
+      - {id: n937k_real_wd05,    label: "wd 0.5",  dir: experiments/rephrase/n937k_real_wd05,  color: 3}
+      - {id: n937k_real_wd1,     label: "wd 1.0",  dir: experiments/rephrase/n937k_real_wd1,   color: 4}
+      - {id: n937k_real_wd2_s,   label: "wd 2.0",  dir: experiments/rephrase/n937k_real_wd2,   color: 5}
+
+  - id: latent_thoughts
+    title: Latent thoughts (1.875M docs, 20B tokens)
+    description: >
+      The first 1.875M DCLM docs with Qwen3.5-2B / -27B <think> blocks inserted between g pieces
+      (g = 4, 8, 16), trained on alone; vs the same docs repeated (~8.5x). Weight decay 0.05.
+    runs:
+      - {id: n1875k_real_wd005_l, label: "real only (~8.5x)", dir: experiments/rephrase/n1875k_real_wd005, color: 1}
+      - {id: lat2b_g4_n1875k_wd005,  label: "2B thoughts, g4",  dir: experiments/latent/lat2b_g4_n1875k_wd005,  color: 2}
+      - {id: lat2b_g8_n1875k_wd005,  label: "2B thoughts, g8",  dir: experiments/latent/lat2b_g8_n1875k_wd005,  color: 3}
+      - {id: lat2b_g16_n1875k_wd005, label: "2B thoughts, g16", dir: experiments/latent/lat2b_g16_n1875k_wd005, color: 4}
+      - {id: lat27b_g4_n1875k_wd005,  label: "27B thoughts, g4",  dir: experiments/latent/lat27b_g4_n1875k_wd005,  color: 5}
+      - {id: lat27b_g8_n1875k_wd005,  label: "27B thoughts, g8",  dir: experiments/latent/lat27b_g8_n1875k_wd005,  color: 6}
+      - {id: lat27b_g16_n1875k_wd005, label: "27B thoughts, g16", dir: experiments/latent/lat27b_g16_n1875k_wd005, color: 7}
