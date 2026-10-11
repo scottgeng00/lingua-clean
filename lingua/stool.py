@@ -165,6 +165,30 @@ def validate_args(args) -> None:
     assert args.partition
 
 
+def _job_env(job_python):
+    """Environment for submitting a job that runs on `job_python`'s venv.
+
+    sbatch passes the submitting process's environment on to the job. When a training run
+    on one venv (e.g. .venv-kd) launches evals on another (LINGUA_EVAL_VENV), the training
+    venv's PATH entry, LINGUA_VENV and the variables its sitecustomize sets leaked into the
+    eval jobs, whose compiled FlexAttention validation then failed with CUDA out-of-memory.
+    """
+    env = os.environ.copy()
+    if not job_python:
+        return env
+    # venv dir of <venv>/bin/python (not realpath of the binary: it symlinks to the base interpreter)
+    job_venv = os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(job_python))))
+    cur_venv = os.path.realpath(os.environ.get("VIRTUAL_ENV") or os.environ.get("LINGUA_VENV") or job_venv)
+    if cur_venv != job_venv:
+        env["PATH"] = os.pathsep.join(
+            p for p in env.get("PATH", "").split(os.pathsep) if not os.path.realpath(p).startswith(cur_venv + os.sep)
+        )
+        env["VIRTUAL_ENV"] = job_venv
+        env["LINGUA_VENV"] = job_venv
+        env.pop("XFORMERS_IGNORE_FLASH_VERSION_CHECK", None)  # set by .venv-kd's sitecustomize
+    return env
+
+
 def launch_job(args: StoolArgs):
     # Set up args default and validate them depending on the cluster or partition requested
     validate_args(args)
@@ -224,7 +248,7 @@ def launch_job(args: StoolArgs):
         f.write(sbatch)
 
     print("Submitting job ...")
-    os.system(f"{args.launcher} {dump_dir}/submit.slurm")
+    subprocess.call(f"{args.launcher} {dump_dir}/submit.slurm", shell=True, env=_job_env(args.anaconda))
 
     print("Done.")
 

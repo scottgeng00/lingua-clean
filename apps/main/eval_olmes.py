@@ -224,6 +224,11 @@ def _clean_env_for_olmes() -> dict:
     env["TORCHDYNAMO_DISABLE"] = "1"
     env["TOKENIZERS_PARALLELISM"] = "false"
     env["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+    # Read task datasets from the local HF cache. With ~100 eval jobs in flight, OLMES's
+    # per-subtask Hub metadata calls hit the 1000-requests/5-min rate limit (HTTP 429) and
+    # whole shards failed. Export HF_HUB_OFFLINE=0 to allow downloads (e.g. a new task).
+    env.setdefault("HF_HUB_OFFLINE", "1")
+    env.setdefault("HF_DATASETS_OFFLINE", env["HF_HUB_OFFLINE"])
 
     return env
 
