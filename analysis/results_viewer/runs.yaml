@@ -118,3 +118,39 @@ groups:
       - {id: lat27b_g4_n1875k_wd005,  label: "27B thoughts, g4",  dir: experiments/latent/lat27b_g4_n1875k_wd005,  color: 5}
       - {id: lat27b_g8_n1875k_wd005,  label: "27B thoughts, g8",  dir: experiments/latent/lat27b_g8_n1875k_wd005,  color: 6}
       - {id: lat27b_g16_n1875k_wd005, label: "27B thoughts, g16", dir: experiments/latent/lat27b_g16_n1875k_wd005, color: 7}
+
+  - id: epochs_n937k_wd005
+    title: Epoch tuning, 0.94M real docs (wd 0.05)
+    description: >
+      The first 937,500 DCLM docs repeated for 4 / 8 / 12 / 17 epochs (each with its own full
+      cosine schedule), vs the same docs + 15 Qwen3.5-2B rewrites each (20B tokens). Weight decay 0.05.
+    runs:
+      - {id: ep_n937k_real_ep4_wd005,  label: "real, 4 epochs (4.7B tok)",   dir: experiments/rephrase/n937k_real_ep4_wd005,  color: 1}
+      - {id: ep_n937k_real_ep8_wd005,  label: "real, 8 epochs (9.4B tok)",   dir: experiments/rephrase/n937k_real_ep8_wd005,  color: 2}
+      - {id: ep_n937k_real_ep12_wd005, label: "real, 12 epochs (14.1B tok)", dir: experiments/rephrase/n937k_real_ep12_wd005, color: 3}
+      - {id: ep_n937k_real_ep17_wd005, label: "real, 17 epochs (20B tok)",   dir: experiments/rephrase/n937k_real_wd005,      color: 4}
+      - {id: ep_n937k_rw2b_k15_wd005,  label: "+ 15 rewrites 2B (20B tok)",  dir: experiments/rephrase/n937k_rw2b_k15_wd005,  color: 5}
+
+  - id: epochs_n937k_wd02
+    title: Epoch tuning, 0.94M real docs (wd 0.2)
+    description: >
+      The first 937,500 DCLM docs repeated for 4 / 8 / 12 / 17 epochs (each with its own full
+      cosine schedule), vs the same docs + 15 Qwen3.5-2B rewrites each (20B tokens). Weight decay 0.2.
+    runs:
+      - {id: ep_n937k_real_ep4_wd02,  label: "real, 4 epochs (4.7B tok)",   dir: experiments/rephrase/n937k_real_ep4_wd02,  color: 1}
+      - {id: ep_n937k_real_ep8_wd02,  label: "real, 8 epochs (9.4B tok)",   dir: experiments/rephrase/n937k_real_ep8_wd02,  color: 2}
+      - {id: ep_n937k_real_ep12_wd02, label: "real, 12 epochs (14.1B tok)", dir: experiments/rephrase/n937k_real_ep12_wd02, color: 3}
+      - {id: ep_n937k_real_ep17_wd02, label: "real, 17 epochs (20B tok)",   dir: experiments/rephrase/n937k_real_wd02,      color: 4}
+      - {id: ep_n937k_rw2b_k15_wd02,  label: "+ 15 rewrites 2B (20B tok)",  dir: experiments/rephrase/n937k_rw2b_k15_wd02,  color: 5}
+
+  - id: epochs_n937k_wd05
+    title: Epoch tuning, 0.94M real docs (wd 0.5)
+    description: >
+      The first 937,500 DCLM docs repeated for 4 / 8 / 12 / 17 epochs (each with its own full
+      cosine schedule), vs the same docs + 15 Qwen3.5-2B rewrites each (20B tokens). Weight decay 0.5.
+    runs:
+      - {id: ep_n937k_real_ep4_wd05,  label: "real, 4 epochs (4.7B tok)",   dir: experiments/rephrase/n937k_real_ep4_wd05,  color: 1}
+      - {id: ep_n937k_real_ep8_wd05,  label: "real, 8 epochs (9.4B tok)",   dir: experiments/rephrase/n937k_real_ep8_wd05,  color: 2}
+      - {id: ep_n937k_real_ep12_wd05, label: "real, 12 epochs (14.1B tok)", dir: experiments/rephrase/n937k_real_ep12_wd05, color: 3}
+      - {id: ep_n937k_real_ep17_wd05, label: "real, 17 epochs (20B tok)",   dir: experiments/rephrase/n937k_real_wd05,      color: 4}
+      - {id: ep_n937k_rw2b_k15_wd05,  label: "+ 15 rewrites 2B (20B tok)",  dir: experiments/rephrase/n937k_rw2b_k15_wd05,  color: 5}
