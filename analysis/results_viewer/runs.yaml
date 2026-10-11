@@ -154,3 +154,40 @@ groups:
       - {id: ep_n937k_real_ep12_wd05, label: "real, 12 epochs (14.1B tok)", dir: experiments/rephrase/n937k_real_ep12_wd05, color: 3}
       - {id: ep_n937k_real_ep17_wd05, label: "real, 17 epochs (20B tok)",   dir: experiments/rephrase/n937k_real_wd05,      color: 4}
       - {id: ep_n937k_rw2b_k15_wd05,  label: "+ 15 rewrites 2B (20B tok)",  dir: experiments/rephrase/n937k_rw2b_k15_wd05,  color: 5}
+
+  - id: kd_n937k
+    title: KD at 0.94M docs (Qwen3.5 tokenizer)
+    description: >
+      The first 937,500 DCLM docs (same docs as the 0.94M rewrite / real runs), KD from Qwen3.5-2B
+      (post-trained, the 2B rewriter): epochs x weight decay. Compare with Qwen3-tokenizer runs via
+      bits/char and BPB.
+    runs:
+      - {id: q35tok_kd2binst_n937k_ep4_wd005,  label: "KD, 4 ep, wd 0.05",  dir: experiments/kd_n937k/q35tok_kd2binst_n937k_ep4_wd005,  color: 1}
+      - {id: q35tok_kd2binst_n937k_ep4_wd05,   label: "KD, 4 ep, wd 0.5",   dir: experiments/kd_n937k/q35tok_kd2binst_n937k_ep4_wd05,   color: 2}
+      - {id: q35tok_kd2binst_n937k_ep8_wd005,  label: "KD, 8 ep, wd 0.05",  dir: experiments/kd_n937k/q35tok_kd2binst_n937k_ep8_wd005,  color: 3}
+      - {id: q35tok_kd2binst_n937k_ep8_wd05,   label: "KD, 8 ep, wd 0.5",   dir: experiments/kd_n937k/q35tok_kd2binst_n937k_ep8_wd05,   color: 4}
+      - {id: q35tok_kd2binst_n937k_ep17_wd005, label: "KD, 17 ep, wd 0.05", dir: experiments/kd_n937k/q35tok_kd2binst_n937k_ep17_wd005, color: 5}
+      - {id: q35tok_kd2binst_n937k_ep17_wd05,  label: "KD, 17 ep, wd 0.5",  dir: experiments/kd_n937k/q35tok_kd2binst_n937k_ep17_wd05,  color: 6}
+
+  - id: ce35_n937k
+    title: Tokenizer control at 0.94M docs (Qwen3.5 tokenizer, CE)
+    description: Plain CE with the Qwen3.5 tokenizer on the first 937,500 docs, weight decay 0.5.
+    runs:
+      - {id: q35tok_ce_n937k_ep4_wd05,  label: "CE, 4 ep, wd 0.5",  dir: experiments/kd_n937k/q35tok_ce_n937k_ep4_wd05,  color: 1}
+      - {id: q35tok_ce_n937k_ep8_wd05,  label: "CE, 8 ep, wd 0.5",  dir: experiments/kd_n937k/q35tok_ce_n937k_ep8_wd05,  color: 2}
+      - {id: q35tok_ce_n937k_ep17_wd05, label: "CE, 17 ep, wd 0.5", dir: experiments/kd_n937k/q35tok_ce_n937k_ep17_wd05, color: 3}
+
+  - id: latent_n937k
+    title: Latent thoughts at 0.94M docs (20B tokens)
+    description: >
+      The first 937,500 DCLM docs as Qwen3.5-2B latent-thought documents (g4 ~6.7 passes, g8 ~4.1
+      passes in 20B tokens) at three weight decays, vs real-only (wd 0.5) and + 15 2B rewrites.
+    runs:
+      - {id: lat2b_g4_n937k_wd005, label: "latent g4, wd 0.05", dir: experiments/latent/lat2b_g4_n937k_wd005, color: 1}
+      - {id: lat2b_g4_n937k_wd02,  label: "latent g4, wd 0.2",  dir: experiments/latent/lat2b_g4_n937k_wd02,  color: 2}
+      - {id: lat2b_g4_n937k_wd05,  label: "latent g4, wd 0.5",  dir: experiments/latent/lat2b_g4_n937k_wd05,  color: 3}
+      - {id: lat2b_g8_n937k_wd005, label: "latent g8, wd 0.05", dir: experiments/latent/lat2b_g8_n937k_wd005, color: 4}
+      - {id: lat2b_g8_n937k_wd02,  label: "latent g8, wd 0.2",  dir: experiments/latent/lat2b_g8_n937k_wd02,  color: 5}
+      - {id: lat2b_g8_n937k_wd05,  label: "latent g8, wd 0.5",  dir: experiments/latent/lat2b_g8_n937k_wd05,  color: 6}
+      - {id: lat_ref_n937k_real_wd05, label: "real only, 17 ep, wd 0.5", dir: experiments/rephrase/n937k_real_wd05, color: 7}
+      - {id: lat_ref_n937k_rw2b_wd005, label: "+ 15 rewrites 2B, wd 0.05", dir: experiments/rephrase/n937k_rw2b_k15_wd005, color: 8}
