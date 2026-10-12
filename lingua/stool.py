@@ -165,6 +165,15 @@ def validate_args(args) -> None:
     assert args.partition
 
 
+_LAUNCHER_PREFIXES = ("SLURM_", "SLURMD_", "SBATCH_", "SRUN_", "PMIX_", "PMI_", "OMPI_", "TORCHELASTIC_", "NCCL_", "TORCH_NCCL_")
+_LAUNCHER_VARS = {
+    "RANK", "LOCAL_RANK", "WORLD_SIZE", "LOCAL_WORLD_SIZE", "GROUP_RANK", "GROUP_WORLD_SIZE", "ROLE_RANK",
+    "ROLE_NAME", "ROLE_WORLD_SIZE", "NODE_RANK", "MASTER_ADDR", "MASTER_PORT", "ENABLE_INTRA_NODE_COMM",
+    "PYTORCH_CUDA_ALLOC_CONF", "CUDA_DEVICE_MAX_CONNECTIONS", "CUDA_VISIBLE_DEVICES", "TORCHINDUCTOR_CACHE_DIR",
+    "TRITON_CACHE_DIR", "NNODES", "NPROC_PER_NODE",
+}
+
+
 def _job_env(job_python):
     """Environment for submitting a job that runs on `job_python`'s venv.
 
@@ -174,6 +183,14 @@ def _job_env(job_python):
     eval jobs, whose compiled FlexAttention validation then failed with CUDA out-of-memory.
     """
     env = os.environ.copy()
+    # Jobs submitted from inside a training job (async evals) would also inherit its launcher
+    # state: slurm/torchrun/NCCL variables, ranks, allocator and compile settings. Evals
+    # submitted that way regularly failed in compiled FlexAttention validation ("Triton Error
+    # [CUDA]: out of memory") while the same evals submitted from a login shell always passed,
+    # so submit with none of it; the sbatch script sets everything the job needs.
+    for key in list(env):
+        if key.startswith(_LAUNCHER_PREFIXES) or key in _LAUNCHER_VARS:
+            del env[key]
     if not job_python:
         return env
     # venv dir of <venv>/bin/python (not realpath of the binary: it symlinks to the base interpreter)
