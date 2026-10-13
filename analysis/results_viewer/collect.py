@@ -3,6 +3,7 @@
 Sources per run (all optional; missing ones are skipped):
   <dir>/metrics.jsonl                    training log (loss/out, optim/lr, optim/total_tokens)
   <dir>/<val>                            validation NLL per Dolmino source, one line per step
+                                         (reported per token and as bits per byte)
   <dir>/{evals,olmes_base,olmes}/<step>/olmes_results/[shard_*/]task-*-metrics.json
                                          OLMES per-task metrics (primary score + gold BPB)
 
@@ -104,7 +105,50 @@ def collect_train(run_dir):
     }, tokens_per_step, max_step
 
 
-def collect_val(path):
+# Validation keeps the last VAL_PROMPT_TOKENS tokens of each doc and scores every token after the
+# first (apps/main/generate.py: p[-max_prompt_len:], max_prompt_len = min(max_seqlen, max_tokens)
+# - max_gen_len = 4096 - 1), with no BOS/EOS.
+VAL_PROMPT_TOKENS = 4095
+VAL_ROOT = os.environ.get("DATA_ROOT", "/home/sgeng/scottg/pretrain/assets/data/dolmino_splits")
+SCORED_BYTES_CACHE = os.path.expanduser("~/.cache/lingua_results_viewer/val_scored_bytes.json")
+_scored_bytes = None
+
+
+def scored_bytes(tokenizer_path, source):
+    """(docs, UTF-8 bytes of the scored tokens) of a val source under a tokenizer; cached on disk.
+
+    Bits per byte = total NLL / (ln 2 * scored bytes) is tokenizer-independent, unlike NLL per token.
+    """
+    global _scored_bytes
+    if _scored_bytes is None:
+        _scored_bytes = json.load(open(SCORED_BYTES_CACHE)) if os.path.exists(SCORED_BYTES_CACHE) else {}
+    key = f"{os.path.realpath(tokenizer_path)}|{source}"
+    if key not in _scored_bytes:
+        from transformers import AutoTokenizer
+        tok = AutoTokenizer.from_pretrained(tokenizer_path)
+        texts = []
+        with open(os.path.join(VAL_ROOT, source, source.removesuffix("_shuffled") + ".val.jsonl")) as f:
+            for line in f:
+                r = json.loads(line)
+                t = r.get("text", r.get("content", ""))
+                if t.strip():
+                    texts.append(t)
+                if len(texts) == 1000:  # validation.max_steps
+                    break
+        n = sum(len(tok.decode(ids[-VAL_PROMPT_TOKENS:][1:]).encode("utf-8"))
+                for ids in tok(texts, add_special_tokens=False)["input_ids"])
+        _scored_bytes[key] = [len(texts), n]
+        os.makedirs(os.path.dirname(SCORED_BYTES_CACHE), exist_ok=True)
+        json.dump(_scored_bytes, open(SCORED_BYTES_CACHE, "w"), indent=1)
+    return _scored_bytes[key]
+
+
+def run_tokenizer(run_dir):
+    cfg = _cached(os.path.join(run_dir, "config.yaml"), lambda p: yaml.safe_load(open(p))) or {}
+    return ((cfg.get("data") or {}).get("tokenizer") or {}).get("path")
+
+
+def collect_val(path, tokenizer_path=None):
     by_step = {}
     for d in _cached(path, _read_jsonl) or []:
         step = d.get("global_step")
@@ -113,11 +157,11 @@ def collect_val(path):
         doms = {}
         for k, v in d.items():
             if isinstance(v, dict) and "nll_per_token" in v:
-                doms[k.removesuffix("_shuffled")] = {
-                    "tok": round(-v["nll_per_token"], 5),
-                    # nats/char -> bits/char (bytes for ASCII)
-                    "char": round(-v["nll_per_char"] / math.log(2), 5) if "nll_per_char" in v else None,
-                }
+                byte = None
+                if tokenizer_path and "nll" in v:
+                    n_docs, n_bytes = scored_bytes(tokenizer_path, k)
+                    byte = round(-v["nll"] * n_docs / n_bytes / math.log(2), 5)
+                doms[k.removesuffix("_shuffled")] = {"tok": round(-v["nll_per_token"], 5), "byte": byte}
         prev = by_step.get(step)
         if doms and (prev is None or d.get("created_at", "") >= prev[0]):
             by_step[step] = (d.get("created_at", ""), doms)
@@ -217,7 +261,7 @@ def collect(registry_path=None):
         for r in g["runs"]:
             path = r["path"]
             train, tps, max_step = collect_train(path)
-            val = collect_val(os.path.join(path, r.get("val", "metrics.validation.jsonl")))
+            val = collect_val(os.path.join(path, r.get("val", "metrics.validation.jsonl")), run_tokenizer(path))
             olmes = collect_olmes(path)
             for rec in val:
                 for d in rec["domains"]:

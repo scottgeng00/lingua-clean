@@ -14,7 +14,7 @@ const S = {
   tab: "val",
   x: "tokens",         // tokens | step
   range: "all",        // all | half | quarter
-  unit: "tok",         // tok (nats/token) | char (bits/char)
+  unit: "tok",         // tok (nats/token) | byte (bits/byte)
   mode: "abs",         // abs | delta
   ref: "",             // reference run for deltas
   metric: "score",     // score | bpb (downstream)
@@ -58,6 +58,7 @@ function loadHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   for (const k of ["tab", "x", "range", "unit", "mode", "ref", "metric", "at"]) if (p.has(k)) S[k] = p.get(k);
   if (p.has("runs")) S.selected = p.get("runs").split(",").filter(Boolean);
+  if (S.unit === "char") S.unit = "byte";
   if (p.has("tasks")) S.tasks = p.get("tasks").split(",").filter(Boolean);
 }
 
@@ -333,7 +334,7 @@ function renderFilters() {
     f.append(seg("X axis", "x", [["tokens", "Tokens"], ["step", "Step"]]));
     f.append(seg("Range", "range", [["all", "All"], ["half", "Last 50%"], ["quarter", "Last 25%"]]));
   }
-  if (S.tab === "val" || S.tab === "table") f.append(seg("Val metric", "unit", [["tok", "NLL / token"], ["char", "bits / char"]]));
+  if (S.tab === "val" || S.tab === "table") f.append(seg("Val metric", "unit", [["tok", "NLL / token"], ["byte", "bits / byte"]]));
   if (S.tab === "downstream") f.append(seg("Metric", "metric", [["score", "Score"], ["bpb", "Gold BPB"]]));
   if (S.tab === "val" || S.tab === "downstream") f.append(seg("Show", "mode", [["abs", "Absolute"], ["delta", "Δ vs reference"]]));
   if (S.tab === "table") {
@@ -355,7 +356,7 @@ function viewVal(view) {
   const delta = S.mode === "delta";
   const lists = doms.map((d) => seriesFor((r) => valPoints(r, d), { delta }));
   const dx = xDomain(lists);
-  const unit = S.unit === "tok" ? "NLL per token (nats)" : "bits per char";
+  const unit = S.unit === "tok" ? "NLL per token (nats)" : "bits per byte";
   $("#note").textContent = `Held-out Dolmino val sets (1000 docs per source). ${delta ? `Δ = run − ${run(S.ref).label} at the same step; below 0 is better.` : "Lower is better."}`;
   const grid = el("div", { class: "grid" });
   view.append(grid);
@@ -443,7 +444,7 @@ function pickRow(ptsPerRun) {
 
 function viewTable(view) {
   const ids = selectedRuns();
-  const unitName = S.unit === "tok" ? "NLL / token" : "bits / char";
+  const unitName = S.unit === "tok" ? "NLL / token" : "bits / byte";
   const rows = [];
   rows.push({ section: `Validation ${unitName} (lower is better)` });
   for (const d of [...S.data.val_domains, "mean"]) {

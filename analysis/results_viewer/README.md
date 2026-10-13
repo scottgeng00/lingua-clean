@@ -40,8 +40,9 @@ own to dump everything as JSON (`--out results.json`).
 
 ## Views
 
-- **Validation**: one chart per val source plus the mean; NLL/token or bits/char;
-  absolute or Δ vs a reference run at the same step.
+- **Validation**: one chart per val source plus the mean; NLL/token or bits/byte (total
+  NLL / scored UTF-8 bytes, comparable across tokenizers); absolute or Δ vs a reference run
+  at the same step.
 - **Downstream**: OLMES tasks (toggle chips); primary score or gold BPB; absolute or Δ.
 - **Training**: training loss (own training data, so not comparable across data mixes)
   and learning rate.
