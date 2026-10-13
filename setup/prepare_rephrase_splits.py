@@ -163,14 +163,19 @@ def main():
         n = sum(cnt for name, _, cnt in written if name == o["name"])
         assert n == o["n_docs"] * o["k"] == totals[o["name"]], (o["name"], n, totals[o["name"]])
         o["records"] = n
+    # merge into an existing dataset.json so several invocations can share one output dir
+    meta_path = os.path.join(args.out, "dataset.json")
+    prev = json.load(open(meta_path)) if os.path.exists(meta_path) else {"inputs": {}, "outputs": []}
+    new_names = {o["name"] for o in outputs}
     json.dump({
         "description": "Rephrases of the first n_docs docs of dclm.first-15m (rows of rewrite_splits/dclm_15m), "
                        "rephrase indices 0..k-1, globally shuffled into 16 chunks. Train the real docs from "
                        "dclm_15m with data.source_max_docs = n_docs.",
-        "real_docs_split": args.dclm, "seed": SEED, "inputs": meta,
-        "outputs": [{k: v for k, v in o.items() if k != "run_dir"} for o in outputs],
+        "real_docs_split": args.dclm, "seed": SEED, "inputs": {**prev["inputs"], **meta},
+        "outputs": [o for o in prev["outputs"] if o["name"] not in new_names]
+                   + [{k: v for k, v in o.items() if k != "run_dir"} for o in outputs],
         "elapsed_seconds": round(time.time() - t0),
-    }, open(os.path.join(args.out, "dataset.json"), "w"), indent=2)
+    }, open(meta_path, "w"), indent=2)
     print(f"done in {time.time() - t0:.0f}s", flush=True)
 
 

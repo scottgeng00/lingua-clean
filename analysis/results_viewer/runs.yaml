@@ -191,3 +191,18 @@ groups:
       - {id: lat2b_g8_n937k_wd05,  label: "latent g8, wd 0.5",  dir: experiments/latent/lat2b_g8_n937k_wd05,  color: 6}
       - {id: lat_ref_n937k_real_wd05, label: "real only, 17 ep, wd 0.5", dir: experiments/rephrase/n937k_real_wd05, color: 7}
       - {id: lat_ref_n937k_rw2b_wd005, label: "+ 15 rewrites 2B, wd 0.05", dir: experiments/rephrase/n937k_rw2b_k15_wd005, color: 8}
+
+  - id: size_n937k
+    title: Rewriter / teacher size at 0.94M docs (2B vs 9B vs 27B)
+    description: >
+      Same 937,500 DCLM docs: + 15 rewrites per doc from Qwen3.5-2B/9B/27B (wd 0.2, 20B tokens) vs KD
+      from the same models on the repeated real docs (17 epochs, wd 0.5, Qwen3.5 tokenizer), and the
+      best real-only run. Compare across tokenizers with bits/char and BPB.
+    runs:
+      - {id: sz_real_best,  label: "real only (8 ep, wd 0.5)",   dir: experiments/rephrase/n937k_real_ep8_wd05,              color: 1}
+      - {id: sz_rw2b,       label: "+ 15 rewrites 2B (wd 0.2)",  dir: experiments/rephrase/n937k_rw2b_k15_wd02,              color: 2}
+      - {id: sz_rw9b,       label: "+ 15 rewrites 9B (wd 0.2)",  dir: experiments/rephrase/n937k_rw9b_k15_wd02,              color: 3}
+      - {id: sz_rw27b,      label: "+ 15 rewrites 27B (wd 0.2)", dir: experiments/rephrase/n937k_rw27b_k15_wd02,             color: 4}
+      - {id: sz_kd2b,       label: "KD 2B (17 ep, wd 0.5)",      dir: experiments/kd_n937k/q35tok_kd2binst_n937k_ep17_wd05,  color: 5}
+      - {id: sz_kd9b,       label: "KD 9B (17 ep, wd 0.5)",      dir: experiments/kd_n937k/q35tok_kd9binst_n937k_ep17_wd05,  color: 6}
+      - {id: sz_kd27b,      label: "KD 27B (17 ep, wd 0.5)",     dir: experiments/kd_n937k/q35tok_kd27binst_n937k_ep17_wd05, color: 7}
