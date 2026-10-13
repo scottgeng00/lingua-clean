@@ -177,6 +177,16 @@ groups:
       - {id: q35tok_ce_n937k_ep8_wd05,  label: "CE, 8 ep, wd 0.5",  dir: experiments/kd_n937k/q35tok_ce_n937k_ep8_wd05,  color: 2}
       - {id: q35tok_ce_n937k_ep17_wd05, label: "CE, 17 ep, wd 0.5", dir: experiments/kd_n937k/q35tok_ce_n937k_ep17_wd05, color: 3}
 
+  - id: tok_n937k
+    title: Tokenizer effect at 0.94M docs (Qwen3 vs Qwen3.5)
+    description: Same data and hparams, only the tokenizer differs. Compare in bits/byte; OLMES gold BPB favors the Qwen3.5 tokenizer by ~0.04 even for identical data.
+    runs:
+      - {id: tok_real_q3,  label: "real, 8 ep, wd 0.5 (Qwen3 tok)",          dir: experiments/rephrase/n937k_real_ep8_wd05,              color: 1}
+      - {id: tok_real_q35, label: "real, 8 ep, wd 0.5 (Qwen3.5 tok)",        dir: experiments/kd_n937k/q35tok_ce_n937k_ep8_wd05,         color: 2}
+      - {id: tok_rw2b_q3,  label: "+ 15 rewrites 2B, wd 0.2 (Qwen3 tok)",    dir: experiments/rephrase/n937k_rw2b_k15_wd02,              color: 3}
+      - {id: tok_rw2b_q35, label: "+ 15 rewrites 2B, wd 0.2 (Qwen3.5 tok)",  dir: experiments/rephrase/q35tok_n937k_rw2b_k15_wd02,       color: 4}
+      - {id: tok_kd2b,     label: "KD 2B, 17 ep, wd 0.5 (Qwen3.5 tok)",      dir: experiments/kd_n937k/q35tok_kd2binst_n937k_ep17_wd05,  color: 5}
+
   - id: latent_n937k
     title: Latent thoughts at 0.94M docs (20B tokens)
     description: >
