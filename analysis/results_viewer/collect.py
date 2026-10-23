@@ -286,6 +286,9 @@ def collect(registry_path=None):
         ],
         "runs": runs,
         "val_domains": val_domains,
+        # "mean over sources" stays the six Dolmino sources, so runs that also report
+        # extra sets (e.g. dclm_heldout) remain comparable with runs that do not
+        "mean_domains": [d for d in preferred if d in val_domains],
         "tasks": sorted(task_names),
     }
 

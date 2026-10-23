@@ -81,7 +81,7 @@ function valPoints(r, dom) {
   for (const rec of r.val) {
     let v;
     if (dom === "mean") {
-      const vals = S.data.val_domains.map((d) => rec.domains[d] && rec.domains[d][S.unit]);
+      const vals = (S.data.mean_domains || S.data.val_domains).map((d) => rec.domains[d] && rec.domains[d][S.unit]);
       if (vals.some((x) => x == null)) continue;
       v = vals.reduce((a, b) => a + b, 0) / vals.length;
     } else {
@@ -361,7 +361,7 @@ function viewVal(view) {
   const grid = el("div", { class: "grid" });
   view.append(grid);
   doms.forEach((d, i) => lineChart(grid, {
-    title: d === "mean" ? "Mean over sources" : d, sub: delta ? `Δ ${unit}` : unit,
+    title: d === "mean" ? "Mean over the 6 Dolmino sources" : d, sub: delta ? `Δ ${unit}` : unit,
     series: lists[i], domainX: dx, lowerBetter: true, zeroLine: delta,
     fmtVal: delta ? fmtSigned : fmt3,
   }));
@@ -448,7 +448,7 @@ function viewTable(view) {
   const rows = [];
   rows.push({ section: `Validation ${unitName} (lower is better)` });
   for (const d of [...S.data.val_domains, "mean"]) {
-    rows.push({ name: d === "mean" ? "mean over sources" : d, lower: true, get: (r) => valPoints(r, d) });
+    rows.push({ name: d === "mean" ? "mean over 6 Dolmino sources" : d, lower: true, get: (r) => valPoints(r, d) });
   }
   const tasks = availableTasks();
   const scoreTasks = tasks.filter((t) => !taskLowerBetter(t, "score"));

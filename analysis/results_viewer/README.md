@@ -40,7 +40,8 @@ own to dump everything as JSON (`--out results.json`).
 
 ## Views
 
-- **Validation**: one chart per val source plus the mean; NLL/token or bits/byte (total
+- **Validation**: one chart per val source plus the mean (over the six Dolmino sources only, so
+  runs with extra sets such as `dclm_heldout` stay comparable); NLL/token or bits/byte (total
   NLL / scored UTF-8 bytes, comparable across tokenizers); absolute or Δ vs a reference run
   at the same step.
 - **Downstream**: OLMES tasks (toggle chips); primary score or gold BPB; absolute or Δ.
