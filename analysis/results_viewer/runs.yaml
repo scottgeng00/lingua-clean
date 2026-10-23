@@ -239,3 +239,31 @@ groups:
       - {id: gs_r_wd_lo,      label: "R, wd 0.03",                     dir: experiments/genscale/r_lr2p65e3_wd003,      color: 6}
       - {id: gs_r_wd_hi,      label: "R, wd 0.3",                      dir: experiments/genscale/r_lr2p65e3_wd03,       color: 7}
       - {id: gs_s1x2,         label: "2xS1, centre",                   dir: experiments/genscale/s1x2_lr2p65e3_wd01,    color: 8}
+
+  - id: genscale_lr_edge
+    title: "Generator scaling: R sweep past its best point (lr 5.3e-3)"
+    runs:
+      - {id: gs_r_lr_hi2,     label: "R, lr 5.3e-3, wd 0.1 (best of sweep)", dir: experiments/genscale/r_lr5p3e3_wd01,  color: 1}
+      - {id: gs_r_lr_x4,      label: "R, lr 1.06e-2, wd 0.1",                dir: experiments/genscale/r_lr1p06e2_wd01, color: 2}
+      - {id: gs_r_lr_hi_wd05, label: "R, lr 5.3e-3, wd 0.05",                dir: experiments/genscale/r_lr5p3e3_wd005, color: 3}
+      - {id: gs_r_centre2,    label: "R, lr 2.65e-3, wd 0.1 (centre)",       dir: experiments/genscale/r_lr2p65e3_wd01, color: 4}
+
+  - id: genscale_synth
+    title: "Generator scaling: S1 + Rewrite(S2) vs real (lr 5.3e-3, wd 0.1, 20B tokens)"
+    description: Rewrites of dclm_8m_1 (1 per doc, max 4096 new tokens), mixed 1:1 per doc with dclm_8m_0. dclm_heldout is the main DCLM number.
+    runs:
+      - {id: gs_syn_r,          label: "R = S1 + S2 (real)",           dir: experiments/genscale/r_lr5p3e3_wd01,               color: 1}
+      - {id: gs_syn_s1x2,       label: "2xS1",                         dir: experiments/genscale/s1x2_lr5p3e3_wd01,            color: 2}
+      - {id: gs_syn_2bwiki,     label: "S1 + Rw 2B wiki (S2)",         dir: experiments/genscale/s1_rw2bwiki_lr5p3e3_wd01,     color: 3}
+      - {id: gs_syn_2bguided,   label: "S1 + Rw 2B guided (S2)",       dir: experiments/genscale/s1_rw2bguided_lr5p3e3_wd01,   color: 4}
+      - {id: gs_syn_9bwiki,     label: "S1 + Rw 9B wiki (S2)",         dir: experiments/genscale/s1_rw9bwiki_lr5p3e3_wd01,     color: 5}
+      - {id: gs_syn_9bguided,   label: "S1 + Rw 9B guided (S2)",       dir: experiments/genscale/s1_rw9bguided_lr5p3e3_wd01,   color: 6}
+      - {id: gs_syn_27bwiki,    label: "S1 + Rw 27B wiki (S2)",        dir: experiments/genscale/s1_rw27bwiki_lr5p3e3_wd01,    color: 7}
+      - {id: gs_syn_27bguided,  label: "S1 + Rw 27B guided (S2)",      dir: experiments/genscale/s1_rw27bguided_lr5p3e3_wd01,  color: 8}
+
+  - id: genscale_s2rw
+    title: "Generator scaling: rewriting new docs vs rewriting seen docs (2B wiki)"
+    runs:
+      - {id: gs_s2rw_r,     label: "R = S1 + S2 (real)",       dir: experiments/genscale/r_lr5p3e3_wd01,           color: 1}
+      - {id: gs_s2rw_s1,    label: "S1 + Rw 2B wiki (S2)",     dir: experiments/genscale/s1_rw2bwiki_lr5p3e3_wd01, color: 3}
+      - {id: gs_s2rw_s2,    label: "S2 + Rw 2B wiki (S2)",     dir: experiments/genscale/s2_rw2bwiki_lr5p3e3_wd01, color: 5}

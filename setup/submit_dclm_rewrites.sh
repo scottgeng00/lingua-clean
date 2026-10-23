@@ -13,7 +13,8 @@
 #   SUBSET=dclm_8m_1        subset under dclm_subsets/ to rewrite
 #   MODELS="2b 9b"          Qwen3.5 sizes (assets/models/Qwen3.5-<SIZE^^>)
 #   PROMPTS="wiki guided"   handlers in simplescale.harnesses.rewrite
-#   POOLS="h200_comm_shared=64"   space-separated QOS=COUNT worker pools (TP1 workers)
+#   POOLS="h200_comm_shared=64"   space-separated QOS=COUNT worker pools
+#   TP=1                    GPUs per worker (2 is plenty for 27B at 16k context)
 #   MAX_NEW=4096 MAX_DOC=11000 CONTEXT=16384
 set -euo pipefail
 
@@ -24,6 +25,7 @@ POOLS="${POOLS:-h200_comm_shared=64}"
 MAX_NEW="${MAX_NEW:-4096}"
 MAX_DOC="${MAX_DOC:-11000}"
 CONTEXT="${CONTEXT:-16384}"
+TP="${TP:-1}"
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA=/home/sgeng/scottg/pretrain/assets/data
@@ -49,7 +51,7 @@ for size in ${MODELS}; do
             --handler "simplescale.harnesses.rewrite:${prompt}"
             --run-dir "${SS}/runs/${run}"
             "${POOL_ARGS[@]}"
-            --tp 1 --context-length "${CONTEXT}"
+            --tp "${TP}" --context-length "${CONTEXT}"
             --wandb-project simplescale --job-name "ss-${run}"
             --repo "${SS}"
         )
