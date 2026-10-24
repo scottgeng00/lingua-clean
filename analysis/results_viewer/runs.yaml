@@ -267,3 +267,16 @@ groups:
       - {id: gs_s2rw_r,     label: "R = S1 + S2 (real)",       dir: experiments/genscale/r_lr5p3e3_wd01,           color: 1}
       - {id: gs_s2rw_s1,    label: "S1 + Rw 2B wiki (S2)",     dir: experiments/genscale/s1_rw2bwiki_lr5p3e3_wd01, color: 3}
       - {id: gs_s2rw_s2,    label: "S2 + Rw 2B wiki (S2)",     dir: experiments/genscale/s2_rw2bwiki_lr5p3e3_wd01, color: 5}
+
+  - id: genscale_s2_all
+    title: "Generator scaling: rewrites of S2 trained with S2 itself (paraphrase-only) vs with S1 (new docs)"
+    description: All at lr 5.3e-3, wd 0.1, 20B tokens. 2xS2 checks 2xS1 on different docs from the same distribution.
+    runs:
+      - {id: gs_s2a_r,        label: "R = S1 + S2",               dir: experiments/genscale/r_lr5p3e3_wd01,              color: 1}
+      - {id: gs_s2a_s1x2,     label: "2xS1",                      dir: experiments/genscale/s1x2_lr5p3e3_wd01,           color: 2}
+      - {id: gs_s2a_s2x2,     label: "2xS2",                      dir: experiments/genscale/s2x2_lr5p3e3_wd01,           color: 3}
+      - {id: gs_s2a_2bwiki,   label: "S2 + Rw 2B wiki (S2)",      dir: experiments/genscale/s2_rw2bwiki_lr5p3e3_wd01,    color: 4}
+      - {id: gs_s2a_9bwiki,   label: "S2 + Rw 9B wiki (S2)",      dir: experiments/genscale/s2_rw9bwiki_lr5p3e3_wd01,    color: 5}
+      - {id: gs_s2a_27bwiki,  label: "S2 + Rw 27B wiki (S2)",     dir: experiments/genscale/s2_rw27bwiki_lr5p3e3_wd01,   color: 6}
+      - {id: gs_s2a_27bguid,  label: "S2 + Rw 27B guided (S2)",   dir: experiments/genscale/s2_rw27bguided_lr5p3e3_wd01, color: 7}
+      - {id: gs_s2a_s1_9bw,   label: "S1 + Rw 9B wiki (S2)",      dir: experiments/genscale/s1_rw9bwiki_lr5p3e3_wd01,    color: 8}
