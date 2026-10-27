@@ -234,11 +234,18 @@ def _clean_env_for_olmes() -> dict:
 
 
 # Rough relative cost of OLMES tasks, for balancing tasks across GPUs.
-_OLMES_TASK_COST = {"mmlu": 6, "mmlu_pro": 6, "gsm8k": 4, "triviaqa": 4, "naturalqs": 3, "drop": 3, "minerva_math": 3}
+_OLMES_TASK_COST = {"mmlu": 6, "mmlu_pro": 6, "gsm8k": 4, "triviaqa": 4, "naturalqs": 3, "drop": 3, "minerva_math": 3,
+                    # eval v2 (setup/submit_eval_v2.py): Paloma sources are whole-document perplexity passes
+                    "paloma_dolma_100_programing_languages": 4, "paloma_dolma_100_subreddits": 4,
+                    "paloma_c4_100_domains": 4, "paloma_m2d2_s2orc_unsplit": 3}
 
 
 def _task_cost(task: str) -> int:
     base = task.split(":")[0]
+    if task.startswith("gsm8k::olmo3:n32"):  # 32 sampled generations per question
+        return 12
+    if base.startswith("paloma_"):
+        return _OLMES_TASK_COST.get(base, 2)
     if ":bpb" in task:  # gold-likelihood pass only, no generation
         return 1
     return _OLMES_TASK_COST.get(base, 1)
