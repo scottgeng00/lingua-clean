@@ -38,7 +38,7 @@ from apps.main.generate import (
 )
 from apps.main.transformer import LMTransformer, LMTransformerArgs
 from lingua.args import dump_config
-from lingua.checkpoint import CONSOLIDATE_FOLDER, consolidate_checkpoints
+from lingua.checkpoint import CONSOLIDATE_FOLDER, consolidate_checkpoints, consolidation_complete
 from lingua.distributed import (
     DistributedArgs,
     get_global_rank,
@@ -120,7 +120,7 @@ def do_gpu_work(cfg: OlmesEvalArgs):
 
     # --- Consolidate ---
     consolidate_path = Path(cfg.ckpt_dir) / CONSOLIDATE_FOLDER
-    if not consolidate_path.exists():
+    if not consolidation_complete(cfg.ckpt_dir):
         if get_global_rank() == 0:
             logger.info(f"Consolidating checkpoint at {cfg.ckpt_dir}")
             consolidate_path = consolidate_checkpoints(cfg.ckpt_dir)

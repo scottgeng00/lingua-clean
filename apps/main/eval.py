@@ -21,7 +21,7 @@ from apps.main.generate import (
 )
 from apps.main.transformer import LMTransformer, LMTransformerArgs
 from lingua.args import dump_config
-from lingua.checkpoint import CONSOLIDATE_FOLDER, consolidate_checkpoints
+from lingua.checkpoint import CONSOLIDATE_FOLDER, consolidate_checkpoints, consolidation_complete
 from lingua.data import init_choice_state, setup_sources
 from lingua.distributed import (
     DistributedArgs,
@@ -276,7 +276,7 @@ def launch_eval(cfg: EvalArgs):
         consolidate_path = Path(cfg.ckpt_dir)
     else:
         consolidate_path = Path(cfg.ckpt_dir) / CONSOLIDATE_FOLDER
-        if not consolidate_path.exists() and get_global_rank() == 0:
+        if not consolidation_complete(cfg.ckpt_dir) and get_global_rank() == 0:
             consolidate_path = consolidate_checkpoints(cfg.ckpt_dir)
 
     Path(cfg.dump_dir).mkdir(parents=True, exist_ok=True)

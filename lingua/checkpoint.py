@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
@@ -41,6 +43,7 @@ RE_CKPT = r"__\d_\d\.distcp"
 
 CONSOLIDATE_FOLDER = "consolidated"
 CONSOLIDATE_NAME = "consolidated.pth"
+CONSOLIDATE_STAGING_PREFIX = ".consolidated.tmp-"
 
 CONFIG_NAME = "params.json"
 TRAIN_STATE_NAME = "train_state_{:05d}.json"
@@ -77,15 +80,29 @@ def consolidate_checkpoints(ckpt_dir: str):
     Returns the path to the consolidated checkpoint
     """
     consolidate_path = Path(ckpt_dir) / CONSOLIDATE_FOLDER
-    if not (consolidate_path / CONSOLIDATE_NAME).exists():
-        consolidate_path.mkdir(exist_ok=True)
-        logger.info(f"Consolidating to: {str(consolidate_path)}")
-        dcp_to_torch_save(ckpt_dir, str(consolidate_path / CONSOLIDATE_NAME))
-        (consolidate_path / CONFIG_NAME).write_text(
-            (Path(ckpt_dir) / CONFIG_NAME).read_text()
-        )
+    if not consolidation_complete(ckpt_dir):
+        # Build in a private staging dir and publish with one rename, so a job killed mid-write
+        # (preemption / requeue) never leaves a consolidated/ that looks done but is empty or
+        # truncated; a later run would skip consolidation and fail on the missing params.json.
+        staging = Path(ckpt_dir) / f"{CONSOLIDATE_STAGING_PREFIX}{uuid.uuid4().hex}"
+        staging.mkdir()
+        logger.info(f"Consolidating to: {str(consolidate_path)} (staging in {staging.name})")
+        try:
+            dcp_to_torch_save(ckpt_dir, str(staging / CONSOLIDATE_NAME))
+            (staging / CONFIG_NAME).write_text((Path(ckpt_dir) / CONFIG_NAME).read_text())
+            if consolidate_path.exists():  # incomplete leftover from an older, non-atomic run
+                shutil.rmtree(consolidate_path)
+            os.replace(staging, consolidate_path)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         logger.info("Consolidated !")
     return consolidate_path
+
+
+def consolidation_complete(ckpt_dir: str) -> bool:
+    """True iff ckpt_dir/consolidated/ holds a published consolidation (weights + params.json)."""
+    consolidate_path = Path(ckpt_dir) / CONSOLIDATE_FOLDER
+    return (consolidate_path / CONSOLIDATE_NAME).is_file() and (consolidate_path / CONFIG_NAME).is_file()
 
 def load_from_checkpoint(ckpt_dir: str, model: nn.Module, optimizer: Optional[torch.optim.Optimizer] = None, model_key: str = "model", optim_key: str = "optim"):
     if not (Path(ckpt_dir) / '.metadata').exists():
@@ -157,7 +174,7 @@ class CheckpointManager:
                     if file.is_file():
                         file.unlink()
                     elif file.is_dir():
-                        assert file.name in [CONSOLIDATE_FOLDER]
+                        assert file.name == CONSOLIDATE_FOLDER or file.name.startswith(CONSOLIDATE_STAGING_PREFIX), file
                         for f in file.iterdir():
                             f.unlink()
                         file.rmdir()
