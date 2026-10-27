@@ -14,13 +14,14 @@ contexts, NCCL buffers, and compiled kernel caches.
 """
 
 import gc
+import glob
 import json
 import logging
 import os
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -85,6 +86,11 @@ class OlmesArgs:
     # process alive (worker processes don't exit) and hold the GPU until the
     # job's time limit.
     timeout_hours: float = 3.0
+    # OLMES's run_eval defaults to --batch-size 1, i.e. one request per vLLM call: ~1.5k tok/s for
+    # a 0.6B model on a GB300 (gsm8k pass@32 alone took >4 h). "auto" hands vLLM all requests at once
+    # (6x faster end to end). Loglikelihood scores are identical; sampled tasks (gsm8k pass@k)
+    # draw different samples, as vLLM's random stream depends on batching.
+    batch_size: str = "auto"
 
 
 @dataclass
@@ -272,10 +278,11 @@ def _shard_tasks(tasks: List[str], n: int) -> List[List[str]]:
 def _olmes_cmd(hf_path: str, olmes_args: OlmesArgs, tasks: List[str], output_dir: str) -> str:
     model_args = {
         "trust_remote_code": olmes_args.trust_remote_code,
-        "gpu_memory_utilization": olmes_args.gpu_memory_utilization,
         "max_length": olmes_args.max_length,
         "tokenizer": olmes_args.tokenizer_path,
     }
+    if olmes_args.model_type == "vllm":  # the hf backend passes unknown args on to from_pretrained
+        model_args["gpu_memory_utilization"] = olmes_args.gpu_memory_utilization
     # Newer OLMES rejects unknown model args ("Hashing error! Key tokenizer_revision
     # not in defaults"), so only pass a revision when one is actually requested.
     if olmes_args.tokenizer_revision and olmes_args.tokenizer_revision != "main":
@@ -312,6 +319,7 @@ export VLLM_WORKER_MULTIPROC_METHOD=spawn
 olmes \
     --model {hf_path} \
     --model-type {olmes_args.model_type} \
+    --batch-size {olmes_args.batch_size} \
     --model-args '{model_args}' \
     --task {' '.join(tasks)} \
     --output-dir {output_dir}
@@ -331,54 +339,86 @@ def _wait_olmes(proc: subprocess.Popen, deadline: float, label: str) -> int:
     return proc.returncode
 
 
-def run_olmes(hf_path: str, olmes_args: OlmesArgs, output_dir: str) -> Optional[dict]:
-    """Run OLMES in the OLMES env; with N visible GPUs, split the tasks into N
-    shards, run one OLMES process per GPU, and merge the shards' metrics.json."""
-    os.makedirs(output_dir, exist_ok=True)
-    gpus = _visible_gpus() or [None]
-    shards = _shard_tasks(list(olmes_args.tasks), len(gpus))
-    clean_env = _clean_env_for_olmes()
-    logger.info("Clean env — removed all SLURM/NCCL/MPI/PMIX/TORCHELASTIC/distributed vars")
+def _drop_uncached_paloma(tasks: List[str]) -> List[str]:
+    """allenai/paloma is gated. If it was never downloaded, every OLMES shard holding a Paloma task
+    dies at that task before writing metrics.json, losing the shard's other tasks; skip them instead."""
+    cache = os.environ.get("HF_DATASETS_CACHE") or os.path.join(
+        os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")), "datasets")
+    if glob.glob(os.path.join(cache, "allenai___paloma*")):
+        return tasks
+    kept = [t for t in tasks if not t.endswith("::paloma")]
+    if len(kept) < len(tasks):
+        logger.warning(f"allenai/paloma is not in {cache}; skipping {len(tasks) - len(kept)} Paloma tasks")
+    return kept
 
+
+def _run_shards(hf_path: str, olmes_args: OlmesArgs, tasks: List[str], output_dir: str, prefix: str,
+                deadline: float) -> tuple:
+    """Split tasks over the visible GPUs, run one OLMES process per GPU, and return
+    (metrics.json of every shard that finished, number of shards)."""
+    gpus = _visible_gpus() or [None]
+    shards = _shard_tasks(tasks, len(gpus))
+    clean_env = _clean_env_for_olmes()
     procs = []
-    for i, tasks in enumerate(shards):
-        out = output_dir if len(shards) == 1 else str(Path(output_dir) / f"shard_{i}")
-        cmd = _olmes_cmd(hf_path, olmes_args, tasks, out)
+    for i, shard in enumerate(shards):
+        out = str(Path(output_dir) / f"{prefix}{i}")
+        cmd = _olmes_cmd(hf_path, olmes_args, shard, out)
         env = dict(clean_env)
         if gpus[i] is not None:
             env["CUDA_VISIBLE_DEVICES"] = gpus[i]
-        logger.info(f"Running OLMES shard {i} on GPU {gpus[i]}: {tasks}\n{cmd}")
+        logger.info(f"Running OLMES {prefix}{i} on GPU {gpus[i]}: {shard}\n{cmd}")
         procs.append((i, out, subprocess.Popen(["bash", "-c", cmd], text=True, env=env, start_new_session=True)))
 
-    deadline = time.time() + olmes_args.timeout_hours * 3600
     shard_metrics = []
     for i, out, proc in procs:
-        rc = _wait_olmes(proc, deadline, f"shard {i}")
+        rc = _wait_olmes(proc, deadline, f"{prefix}{i}")
         metrics_file = Path(out) / "metrics.json"
         if rc != 0 and metrics_file.exists():
             # OLMES writes metrics.json last; if it then hung on exit and was killed,
             # the results are complete.
-            logger.warning(f"OLMES shard {i} exited with code {rc} after writing metrics.json; using the results")
+            logger.warning(f"OLMES {prefix}{i} exited with code {rc} after writing metrics.json; using the results")
         elif rc != 0 or not metrics_file.exists():
-            logger.error(f"OLMES shard {i} failed (return code {rc}, metrics.json present: {metrics_file.exists()})")
+            logger.error(f"OLMES {prefix}{i} failed (return code {rc}, metrics.json present: {metrics_file.exists()})")
             continue
         with open(metrics_file) as f:
             shard_metrics.append(json.load(f))
+    return shard_metrics, len(shards)
+
+
+def run_olmes(hf_path: str, olmes_args: OlmesArgs, output_dir: str) -> Optional[dict]:
+    """Run OLMES in the OLMES env; with N visible GPUs, split the tasks into N
+    shards, run one OLMES process per GPU, and merge the shards' metrics.json.
+
+    Paloma (rolling loglikelihood) only works with OLMES's hf backend (VLLM_Verbose has no
+    loglikelihood_rolling_verbose), so Paloma tasks run in a second pass with model_type=hf."""
+    os.makedirs(output_dir, exist_ok=True)
+    tasks = _drop_uncached_paloma(list(olmes_args.tasks))
+    rolling = [t for t in tasks if t.endswith("::paloma")]
+    passes = [(olmes_args, [t for t in tasks if t not in rolling], "shard_")]
+    if rolling:
+        rolling_args = olmes_args if olmes_args.model_type == "hf" else replace(olmes_args, model_type="hf")
+        passes.append((rolling_args, rolling, "paloma_shard_"))
+    logger.info("Clean env — removed all SLURM/NCCL/MPI/PMIX/TORCHELASTIC/distributed vars")
+
+    deadline = time.time() + olmes_args.timeout_hours * 3600
+    shard_metrics, n_shards = [], 0
+    for args, pass_tasks, prefix in passes:
+        if pass_tasks:
+            m, n = _run_shards(hf_path, args, pass_tasks, output_dir, prefix, deadline)
+            shard_metrics += m
+            n_shards += n
 
     if not shard_metrics:
         return None
-    if len(shards) == 1:
-        metrics = shard_metrics[0]
-    else:
-        metrics = {
-            "all_primary_scores": [x for m in shard_metrics for x in m.get("all_primary_scores", [])],
-            "tasks": [x for m in shard_metrics for x in m.get("tasks", [])],
-            "model_config": shard_metrics[0].get("model_config"),
-        }
-        with open(Path(output_dir) / "metrics.json", "w") as f:
-            json.dump(metrics, f)
-        if len(shard_metrics) < len(shards):
-            logger.error(f"Only {len(shard_metrics)}/{len(shards)} OLMES shards produced results")
+    metrics = {
+        "all_primary_scores": [x for m in shard_metrics for x in m.get("all_primary_scores", [])],
+        "tasks": [x for m in shard_metrics for x in m.get("tasks", [])],
+        "model_config": shard_metrics[0].get("model_config"),
+    }
+    with open(Path(output_dir) / "metrics.json", "w") as f:
+        json.dump(metrics, f)
+    if len(shard_metrics) < n_shards:
+        logger.error(f"Only {len(shard_metrics)}/{n_shards} OLMES shards produced results")
 
     logger.info(f"OLMES evaluation complete. Tasks evaluated: {len(metrics.get('tasks', []))}")
     return metrics

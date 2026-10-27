@@ -33,6 +33,25 @@ open(sys.argv[2], "w").write("\n".join(d for d in deps if name(d) not in skip) +
 PY
 
 uv venv --python 3.11 "$VENV"
+if [ "$(uname -m)" = "aarch64" ]; then
+    # GB200/GB300 nodes: torch 2.8.0 has aarch64 CUDA wheels only on the cu129 index, and
+    # flash-attn / xformers have no aarch64 wheels at all. Install everything else first, then
+    # build those two with bin/build_aarch64_wheels.sh (needs this venv) and install them from
+    # $WHEELHOUSE.
+    WHEELHOUSE="${WHEELHOUSE:-${ROOT_DIR}/../wheelhouse}"
+    uv pip install --python "$VENV/bin/python" \
+        --index-strategy unsafe-best-match \
+        --extra-index-url https://download.pytorch.org/whl/cu129 \
+        -r "$REQ" \
+        "torch==2.8.0+cu129" \
+        "transformers==5.19.0" "flash-linear-attention==0.5.2" accelerate einops
+    if ! ls "${WHEELHOUSE}"/flash_attn-2.8.3-*aarch64.whl "${WHEELHOUSE}"/xformers-0.0.32.post2-*aarch64.whl >/dev/null 2>&1; then
+        echo "[install] No aarch64 flash-attn/xformers wheels in ${WHEELHOUSE}; building them (needs a GPU node, CUDA 12.9 at \$CUDA_HOME)."
+        WHEELHOUSE="${WHEELHOUSE}" KD_VENV="${VENV}" bash "${ROOT_DIR}/bin/build_aarch64_wheels.sh"
+    fi
+    uv pip install --python "$VENV/bin/python" --no-deps \
+        "${WHEELHOUSE}"/flash_attn-2.8.3-*aarch64.whl "${WHEELHOUSE}"/xformers-0.0.32.post2-*aarch64.whl
+else
 uv pip install --python "$VENV/bin/python" \
     --index-strategy unsafe-best-match \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
@@ -40,6 +59,7 @@ uv pip install --python "$VENV/bin/python" \
     "torch==2.8.0" "xformers==0.0.32.post2" \
     "flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl" \
     "transformers==5.19.0" "flash-linear-attention==0.5.2" accelerate
+fi
 
 SITE="$("$VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 cat > "$SITE/sitecustomize.py" <<'PY'
@@ -47,6 +67,10 @@ cat > "$SITE/sitecustomize.py" <<'PY'
 # but the torch 2.8 wheel is 2.8.3 (lingua uses flash-attn directly, xformers only for op lists).
 import os
 os.environ.setdefault("XFORMERS_IGNORE_FLASH_VERSION_CHECK", "1")
+# Triton 3.4 bundles a CUDA 12.8 ptxas that rejects GB300 (sm_103a); use CUDA 12.9's.
+_PTXAS = "/checkpoint/mnm/sgeng/pretrain/cuda-12.9/bin/ptxas"
+if os.path.exists(_PTXAS):
+    os.environ.setdefault("TRITON_PTXAS_PATH", _PTXAS)
 PY
 
 "$VENV/bin/python" - <<'PY'

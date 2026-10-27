@@ -9,7 +9,9 @@ gated-delta-rule linear attention) honours.
 Qwen3.5's short causal conv in front of its linear attention has a pure-PyTorch fallback
 (used without the `causal_conv1d` package) that ignores document boundaries; the leak at
 each document start then propagates through the recurrent state and later layers.
-`patch_qwen3_5_packed_conv` swaps in a boundary-aware version when `cu_seq_lens_q` is given.
+`patch_qwen3_5_packed_conv` swaps in a boundary-aware version when `cu_seq_lens_q` is given:
+flash-linear-attention's Triton varlen conv when available (3x faster than the PyTorch version,
+~50 ms per 16k-token Qwen3.5-9B forward on GB300), else `_segmented_causal_conv1d`.
 """
 
 import torch
@@ -72,6 +74,15 @@ def _segmented_causal_conv1d(hidden_states, weight, bias=None, activation=None, 
     return out.to(hidden_states.dtype)
 
 
+def _fla_varlen_causal_conv1d(hidden_states, weight, bias=None, activation=None, cu_seqlens=None):
+    """Same contract as `_segmented_causal_conv1d` (x: (1, C, T)), via fla's Triton kernel."""
+    from fla.modules.convolution import causal_conv1d
+
+    out, _ = causal_conv1d(hidden_states.transpose(1, 2).contiguous(), weight, bias,
+                           activation=activation, cu_seqlens=cu_seqlens.long())
+    return out.transpose(1, 2)
+
+
 def patch_qwen3_5_packed_conv():
     """Make Qwen3.5's causal conv respect document boundaries when cu_seq_lens_q is passed.
 
@@ -85,12 +96,17 @@ def patch_qwen3_5_packed_conv():
     if getattr(mq, "_lingua_packed_conv", False):
         return True
     original = mq.causal_conv1d_fn
+    try:
+        import fla.modules.convolution  # noqa: F401
+        packed_conv = _fla_varlen_causal_conv1d
+    except ImportError:
+        packed_conv = _segmented_causal_conv1d
 
     def causal_conv1d_fn(hidden_states, weight, bias=None, activation=None, **kwargs):
         cu = kwargs.get("cu_seq_lens_q")
         if cu is None or hidden_states.shape[0] != 1:
             return original(hidden_states, weight, bias, activation=activation, **kwargs)
-        return _segmented_causal_conv1d(hidden_states, weight, bias, activation, cu)
+        return packed_conv(hidden_states, weight, bias, activation, cu)
 
     mq.causal_conv1d_fn = causal_conv1d_fn
     mq._lingua_packed_conv = True

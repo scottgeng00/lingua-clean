@@ -182,6 +182,20 @@ Both lingua venvs need `uv` on PATH (`curl -LsSf https://astral.sh/uv/install.sh
 install scripts set `UV_LINK_MODE=copy` because the uv cache and `/checkpoint` are usually on
 different filesystems.
 
+**aarch64 / GB300 clusters** (e.g. the `g3` partition, account `mnm`). Only `.venv-kd` works there and it
+serves for both training and evals (`scripts/env.sh` defaults `LINGUA_VENV` to it). The differences:
+- torch 2.8.0's aarch64 CUDA build is `2.8.0+cu129`. flash-attn 2.8.3 and xformers 0.0.32.post2 have no
+  aarch64 wheels, so `bin/build_aarch64_wheels.sh` builds them (sm_100 kernels, which also run on sm_103)
+  into `../wheelhouse`. It needs a CUDA 12.9 toolkit at `../cuda-12.9`:
+  `conda create --no-default-packages -p ../cuda-12.9 -c conda-forge --override-channels cuda-nvcc=12.9 cuda-cudart-dev=12.9 cuda-libraries-dev=12.9 cuda-nvtx-dev=12.9 cuda-profiler-api=12.9`.
+  `bin/install_kd_requirements.sh` picks all of this up on aarch64.
+- Triton 3.4 ships a CUDA 12.8 `ptxas` that rejects `sm_103a`. Each venv's `sitecustomize.py` sets
+  `TRITON_PTXAS_PATH` to `../cuda-12.9/bin/ptxas`.
+- OLMES env: install `-e .` plus `vllm==0.11.0` without the `[gpu]` extra (its xformers won't build), then
+  add `"pyarrow<20" "setuptools<81" accelerate`. Install torch with `--no-sources` from the cu129 index.
+- Nodes have 4 GPUs. Data parallelism must be a multiple of 16 chunks, so use 4, 8 or 16 nodes.
+  `setup/make_gb300_configs.py` writes the GB300 sweep configs (`experiments/gb300/`).
+
 > The OLMES fork branch `lm-eval-0.4.13` currently exists only in the local checkout
 > (`/home/sgeng/scottg/pretrain/olmes`, a clone of `allenai/olmes` plus a few commits). Push it to
 > a remote you can reach from the new cluster before setting up there.

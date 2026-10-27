@@ -55,12 +55,12 @@ SBATCH_CMD=(
     --job-name="${JOBNAME}"
     --output="${SLURM_LOG_DIR}/${JOBNAME}-%j.out"
     --error="${SLURM_LOG_DIR}/${JOBNAME}-%j.err"
-    --time=122:00:00
-    --cpus-per-task=64
+    --time=${TIME_LIMIT:-7-00:00:00}
+    --cpus-per-task=${CPUS_PER_NODE:-128}
     --nodes="${NNODES}"
     --ntasks-per-node=1
-    --gres=gpu:8
-    --mem=456G
+    --gres=gpu:${GPUS_PER_NODE:-4}
+    --mem=${MEM_PER_NODE:-800G}
     --requeue
 )
 
@@ -72,6 +72,9 @@ if [ -n "${SLURM_QOS:-}" ]; then
 fi
 if [ -n "${SLURM_PARTITION:-}" ]; then
     SBATCH_CMD+=(--partition="${SLURM_PARTITION}")
+fi
+if [ -n "${SLURM_EXCLUDE:-}" ]; then   # e.g. nodes that threw hardware errors
+    SBATCH_CMD+=(--exclude="${SLURM_EXCLUDE}")
 fi
 
 # The inner script keys off RECIPE / RECIPE_YAML — pass our pretrain config

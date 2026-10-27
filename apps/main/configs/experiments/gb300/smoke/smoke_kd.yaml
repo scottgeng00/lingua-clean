@@ -1,0 +1,80 @@
+name: gb300-smoke_kd
+dump_dir: ${oc.env:MIDTRAIN_ROOT}/experiments/gb300/smoke/smoke_kd
+steps: 40
+probe_freq: null
+seed: 777
+grad_acc_steps: 1
+optim:
+  lr: 0.00265
+  weight_decay: 0.1
+  warmup: 10
+  lr_min_ratio: 0.01
+  clip: 1.0
+  beta1: 0.9
+  beta2: 0.95
+  scheduler: cosine
+distributed:
+  fsdp_type: full_shard
+  compile: true
+  model_dtype: bf16
+  matmul_allow_tf32: true
+  selective_activation_checkpointing: false
+  tp_size: 1
+model:
+  dim: 1024
+  n_layers: 28
+  n_heads: 16
+  n_kv_heads: 8
+  head_dim: 128
+  ffn_dim_multiplier: 1.125
+  multiple_of: 256
+  norm_eps: 1.0e-06
+  rope_theta: 1000000
+  max_seqlen: 4096
+  weight_tying: true
+  qk_norm: true
+  qk_norm_per_head: true
+  post_norm: false
+  hf_arch: Qwen3ForCausalLM
+  init_base_std: 0.02
+  seed: 42
+checkpoint:
+  init_ckpt_path: null
+  dump:
+    every: 30
+    keep: 2
+  eval:
+    every: 1000000
+    keep: -1
+data:
+  root_dir: /home/sgeng/scottg/pretrain/assets/data
+  seed: 42
+  batch_size: 4
+  prefetch_size: 64
+  seq_len: 4096
+  n_views: 2
+  load_async: true
+  add_bos: false
+  add_eos: true
+  disable_cross_doc_attn: true
+  sources:
+    dclm_subsets/dclm_8m_0: 1.0
+    dclm_subsets/dclm_8m_1: 1.0
+  tokenizer:
+    name: hf
+    path: /home/sgeng/scottg/pretrain/assets/models/Qwen3.5-2B-tokenizer-eot
+  use_kl_distillation: true
+  kl_alpha: 0.5
+  kl_temperature: 1.0
+profiling:
+  run: false
+logging:
+  freq: 5
+  wandb:
+    project: lingua-clean-smoke
+    entity: ${oc.env:WANDB_ENTITY,null}
+    resume: allow
+async_eval_gpus: null
+eval_backend: olmes
+eval: null
+teacher_model_path: /home/sgeng/scottg/pretrain/assets/models/Qwen3.5-9B-Base

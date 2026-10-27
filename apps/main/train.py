@@ -366,21 +366,39 @@ def _compute_kd_concentration_diagnostics(
 
 
 @torch.compile(dynamic=False)
+@torch.compile(dynamic=False)
+def _kd_chunk(student_chunk, teacher_chunk, labels_chunk, temperature: float):
+    """Per-token KL(teacher || student) at temperature T, hard-label CE, and both entropies for one
+    sequence chunk. Compiled so the full-vocab log-softmaxes fuse into a few kernels (5x faster
+    than eager on GB300: 403 -> 78 ms per 4 x 4096-token microbatch); computed in fp32."""
+    s = student_chunk.float()
+    s_lp = F.log_softmax(s / temperature, dim=-1)
+    t_lp = F.log_softmax(teacher_chunk.float() / temperature, dim=-1)
+    t_p = t_lp.exp()
+    kl = (t_p * (t_lp - s_lp)).sum(-1)
+    ce = F.cross_entropy(s.flatten(0, 1), labels_chunk.flatten(), reduction="none",
+                         ignore_index=-100).view(labels_chunk.shape)
+    with torch.no_grad():
+        t_ent = -(t_p * t_lp).sum(-1)
+        s_ent = -(s_lp.exp() * s_lp).sum(-1)
+    return kl, ce, t_ent, s_ent
+
+
 def compute_kl_distillation_loss(
     student_logits: torch.Tensor,   # (batch_size, seq_len, vocab_size)
     teacher_logits: torch.Tensor,   # (batch_size, seq_len, vocab_size)
     labels: torch.Tensor,           # (batch_size, seq_len)
     temperature: float = 1.0,
     alpha: float = 0.5,
-    chunk_size: int = 128,  # Process this many tokens at a time to save memory
+    chunk_size: int = 1024,  # Process this many tokens at a time to save memory
 ) -> tuple:
     """
     Memory-efficient Classic Knowledge Distillation: minimize KL divergence between student and teacher.
 
     Loss = α * KL(teacher || student) * τ² + (1 - α) * CE(student, labels)
 
-    This implementation processes tokens in chunks along the sequence dimension
-    to avoid materializing full (B, S, V) softmax tensors simultaneously.
+    Tokens are processed in chunks along the sequence dimension (each chunk one compiled
+    `_kd_chunk` call) to avoid materializing full (B, S, V) fp32 softmax tensors at once.
 
     Args:
         student_logits: Student model logits (B, S, V)
@@ -393,71 +411,18 @@ def compute_kl_distillation_loss(
     Returns:
         (total_loss, stats_dict)
     """
-    batch_size, seq_len, vocab_size = student_logits.shape
-    mask = (labels != -100).float()
+    mask = labels != -100
     n_valid = mask.sum().clamp(min=1)
 
-    # Hard label cross-entropy loss (memory efficient - doesn't need full vocab materialization)
-    ce_loss = F.cross_entropy(
-        student_logits.view(-1, vocab_size),
-        labels.view(-1),
-        reduction='none',
-        ignore_index=-100
-    ).view(batch_size, seq_len)
-    ce_loss_mean = ce_loss.sum() / n_valid
+    # Teacher logits come from torch.inference_mode; the compiled backward saves its inputs, which
+    # inference tensors may not be, so each teacher chunk is cloned into a normal tensor.
+    parts = [_kd_chunk(student_logits[:, c:c + chunk_size], teacher_logits[:, c:c + chunk_size].clone(),
+                       labels[:, c:c + chunk_size], float(temperature))
+             for c in range(0, student_logits.shape[1], chunk_size)]
+    kl_per_token, ce_per_token, t_ent, s_ent = (torch.cat(x, dim=1) for x in zip(*parts))
 
-    # Memory-efficient KL computation: process in chunks along sequence dimension
-    kl_per_token = torch.zeros(batch_size, seq_len, device=student_logits.device, dtype=student_logits.dtype)
-
-    # For logging - accumulate entropy stats
-    teacher_entropy_sum = 0.0
-    student_entropy_sum = 0.0
-    n_entropy_samples = 0
-
-    for chunk_start in range(0, seq_len, chunk_size):
-        chunk_end = min(chunk_start + chunk_size, seq_len)
-
-        # Get chunk slices
-        student_chunk = student_logits[:, chunk_start:chunk_end, :]  # (B, chunk, V)
-        teacher_chunk = teacher_logits[:, chunk_start:chunk_end, :]  # (B, chunk, V)
-        mask_chunk = mask[:, chunk_start:chunk_end]  # (B, chunk)
-
-        # Compute scaled log-softmax for student (needs gradients)
-        student_log_soft = F.log_softmax(student_chunk / temperature, dim=-1)
-
-        # Compute log-softmax for teacher (no gradients needed).
-        # Using log_target=True avoids materializing a separate softmax tensor
-        # and allows torch.compile to fuse exp(log_softmax) internally.
-        with torch.no_grad():
-            teacher_log_soft = F.log_softmax(teacher_chunk / temperature, dim=-1)
-
-        # KL(teacher || student) = sum_v exp(teacher_log_soft) * (teacher_log_soft - student_log_soft)
-        kl_chunk = F.kl_div(
-            student_log_soft,
-            teacher_log_soft,
-            reduction='none',
-            log_target=True,
-        ).sum(dim=-1)  # (B, chunk)
-
-        kl_per_token[:, chunk_start:chunk_end] = kl_chunk
-
-        # Accumulate entropy statistics for logging (sampled from first chunk only to save compute)
-        if chunk_start == 0:
-            with torch.no_grad():
-                chunk_mask = mask_chunk.bool()
-                if chunk_mask.any():
-                    # Reuse already-computed log_softmax for entropy — avoids extra log() call.
-                    teacher_ent = -(teacher_log_soft * torch.exp(teacher_log_soft)).sum(dim=-1)
-                    student_ent = -(student_log_soft * torch.exp(student_log_soft)).sum(dim=-1)
-                    teacher_entropy_sum = teacher_ent[chunk_mask].sum().item()
-                    student_entropy_sum = student_ent[chunk_mask].sum().item()
-                    n_entropy_samples = chunk_mask.sum().item()
-
-        # Free intermediate tensors
-        del student_log_soft, teacher_log_soft, kl_chunk
-
-    # Apply mask and compute mean KL
     kl_loss_mean = (kl_per_token * mask).sum() / n_valid
+    ce_loss_mean = (ce_per_token * mask).sum() / n_valid
 
     # Scale KL by temperature² to maintain gradient magnitude
     kl_loss_scaled = kl_loss_mean * (temperature ** 2)
@@ -466,21 +431,15 @@ def compute_kl_distillation_loss(
     total_loss = alpha * kl_loss_scaled + (1 - alpha) * ce_loss_mean
 
     with torch.no_grad():
-        valid_kl = kl_per_token[mask.bool()]
-        valid_ce = ce_loss[mask.bool()]
-
-        stats = {
-            "kd/kl_loss": kl_loss_scaled.item(),
-            "kd/ce_loss": ce_loss_mean.item(),
-            "kd/total_loss": total_loss.item(),
-            "kd/kl_per_token_mean": valid_kl.mean().item(),
-            "kd/kl_per_token_std": valid_kl.std().item(),
-            "kd/ce_per_token_mean": valid_ce.mean().item(),
-            "kd/teacher_entropy_mean": teacher_entropy_sum / max(n_entropy_samples, 1),
-            "kd/student_entropy_mean": student_entropy_sum / max(n_entropy_samples, 1),
-            "kd/temperature": temperature,
-            "kd/alpha": alpha,
-        }
+        valid_kl = kl_per_token[mask]
+        valid_ce = ce_per_token[mask]
+        vals = torch.stack([kl_loss_scaled, ce_loss_mean, total_loss, valid_kl.mean(), valid_kl.std(),
+                            valid_ce.mean(), t_ent[mask].mean(), s_ent[mask].mean()]).tolist()  # one sync
+        stats = dict(zip(["kd/kl_loss", "kd/ce_loss", "kd/total_loss", "kd/kl_per_token_mean",
+                          "kd/kl_per_token_std", "kd/ce_per_token_mean", "kd/teacher_entropy_mean",
+                          "kd/student_entropy_mean"], vals))
+        stats["kd/temperature"] = temperature
+        stats["kd/alpha"] = alpha
 
     return total_loss, stats
 
@@ -7544,6 +7503,8 @@ def train(args: TrainArgs):
                     # Read before clean_env(), which strips every SLURM_* variable.
                     eval_account = os.environ.get("SLURM_ACCOUNT", "dream")
                     eval_qos = os.environ.get("SLURM_QOS", "h200_dream_high")
+                    # Run evals on the training job's partition (StoolArgs defaults to gpu-h200).
+                    eval_partition = os.environ.get("SLURM_JOB_PARTITION", StoolArgs.partition)
                     with clean_env():
                         launch_job(
                             StoolArgs(
@@ -7556,6 +7517,7 @@ def train(args: TrainArgs):
                                 mem="200GB",
                                 account=eval_account,
                                 qos=eval_qos,
+                                partition=eval_partition,
                                 # eval_olmes uses every GPU of the job from one process
                                 tasks_per_node=1 if eval_backend == "olmes" else None,
                                 override=False,

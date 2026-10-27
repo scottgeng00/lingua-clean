@@ -11,7 +11,7 @@
 #   OLMES_CONDA_ENV    only if you'll run OLMES evals (mid-train recipes do, every 1200 steps)
 
 # export CACHE_DIR="${CACHE_DIR:-${HOME}/lingua-clean-sandbox}"
-export CACHE_DIR="/checkpoint/dream-sc-3/scottg/pretrain/lingua-runs"
+export CACHE_DIR="${CACHE_DIR:-/checkpoint/mnm/sgeng/pretrain/lingua-runs}"
 
 # Data + checkpoints, all under /home/sgeng/scottg/pretrain/assets. Override by exporting the var before sourcing.
 export DATA_ROOT="${DATA_ROOT:-/home/sgeng/scottg/pretrain/assets/data/dolmino_splits}"
@@ -29,15 +29,18 @@ export SLURM_LOG_DIR="${SLURM_LOG_DIR:-${CACHE_DIR}/runs/slurm_logs}"
 # Python envs. LINGUA_VENV is the uv venv built by bin/install_requirements.sh.
 # OLMES env is separate because it pins different vLLM/transformers versions;
 # it may be either a venv or a conda env.
-export LINGUA_VENV="${LINGUA_VENV:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.venv}"
+# GB300 / aarch64 cluster: only .venv-kd (torch 2.8.0+cu129) runs here, for training and evals.
+export LINGUA_VENV="${LINGUA_VENV:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.venv-kd}"
 export OLMES_CONDA_ENV="${OLMES_CONDA_ENV:-/home/sgeng/scottg/pretrain/olmes/.venv-lmeval}"  # OLMES ported to lm_eval 0.4.13 (branch lm-eval-0.4.13)
 
 # SLURM. Leave a value empty to omit the flag and use the site default.
-export SLURM_ACCOUNT="${SLURM_ACCOUNT:-dream}"
-export SLURM_QOS="${SLURM_QOS:-h200_dream_high}"
+export SLURM_ACCOUNT="${SLURM_ACCOUNT:-mnm}"
+export SLURM_QOS="${SLURM_QOS:-g3_comm_shared}"
 
 # Wandb. Empty → user's default entity.
 export WANDB_ENTITY="${WANDB_ENTITY:-}"
+# Credentials for this host are in ~/.netrc.
+export WANDB_BASE_URL="${WANDB_BASE_URL:-https://meta-fair.wandb.io}"
 
 mkdir -p "${CACHE_DIR}" "${MIDTRAIN_ROOT}" "${EVAL_ROOT}" "${SLURM_LOG_DIR}"
 
