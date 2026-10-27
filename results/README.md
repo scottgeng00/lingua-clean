@@ -22,4 +22,4 @@ Contract for every file here:
 
 - [2026-10-26_multirewrite_study.md](2026-10-26_multirewrite_study.md): repeating real data vs multiple
   Qwen3.5-9B rewrites per doc (iid, T=1.2, Nemotron-CC prompt mixture, WebOrganizer formats, Gacha)
-  in a 10B real + 10B variable setting. Partial.
+  in a 10B real + 10B variable setting. Complete.

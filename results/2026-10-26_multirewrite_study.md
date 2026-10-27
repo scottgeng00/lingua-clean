@@ -1,8 +1,7 @@
 # Multi-rewrite study: repeating real data vs multiple rewrites per doc
 
-**Status:** partial. Numbers pulled 2026-10-26 22:50 UTC.
-- Done: 7 of 12 arms (repeat k=2/4, iid k=2/4, nemo k=2/4, t12 k=2).
-- Pending: t12 k=4 (step 15,150), wofmt k=2/4 (9,970 / 9,480), gacha k=2/4 (2,900 / 2,770).
+**Status:** complete (all 12 arms at step 19074). Numbers pulled 2026-10-27 07:01 UTC; first partial
+snapshot 2026-10-26 22:50 UTC.
 
 ## Question
 
@@ -79,39 +78,61 @@ More on the methods:
 | mr_repeat_k4 | 19074 | 13.07 | 14.10 | 81.7 | 71.2 | 69.0 | 34.5 | 26.7 | 56.6 | 0.930 | 0.626 | 0.863 |
 | mr_iid_k2 | 19074 | 13.62 | 14.36 | 82.9 | 73.1 | 69.4 | 34.7 | 27.5 | 57.5 | 0.952 | 0.618 | 0.867 |
 | mr_iid_k4 | 19074 | 13.75 | 14.53 | 81.7 | 71.9 | 69.1 | 34.9 | 27.2 | 57.0 | 0.962 | 0.623 | 0.883 |
+| mr_t12_k2 | 19074 | 13.77 | 14.17 | 82.1 | 70.1 | 68.7 | 34.3 | 25.5 | 56.1 | 0.957 | 0.632 | 0.837 |
+| mr_t12_k4 | 19074 | 13.79 | 14.17 | 79.9 | 71.5 | 69.3 | 34.4 | 25.5 | 56.1 | 0.959 | 0.633 | 0.851 |
 | mr_nemo_k2 | 19074 | 13.60 | 14.29 | 85.2 | 73.7 | 69.6 | 35.5 | 30.1 | 58.8 | 0.937 | 0.621 | 0.859 |
 | mr_nemo_k4 | 19074 | 13.62 | 14.39 | 83.7 | 75.3 | 70.0 | 35.6 | 30.0 | 58.9 | 0.930 | 0.623 | 0.871 |
-| mr_t12_k2 | 19074 | 13.77 | 14.17 | 82.1 | 70.1 | 68.7 | 34.3 | 25.5 | 56.1 | 0.957 | 0.632 | 0.837 |
+| mr_wofmt_k2 | 19074 | 13.60 | 14.16 | 80.0 | 72.1 | 68.9 | 35.1 | 26.8 | 56.6 | 0.946 | 0.617 | 0.878 |
+| mr_wofmt_k4 | 19074 | 13.67 | 14.21 | 81.3 | 72.5 | 69.0 | 34.8 | 26.7 | 56.9 | 0.949 | 0.615 | 0.878 |
+| mr_gacha_k2 | 19074 | 13.74 | 14.46 | 81.2 | 71.2 | 68.7 | 35.0 | 26.0 | 56.4 | 0.955 | 0.618 | 0.881 |
+| mr_gacha_k4 | 19074 | 13.77 | 14.54 | 81.2 | 71.8 | 69.1 | 34.5 | 26.2 | 56.6 | 0.959 | 0.622 | 0.878 |
 
 Row names: `mr_repeat_k2` = S1 + 2xS2, `mr_iid_k4` = S1 + 4 iid rewrites per S2 doc, etc.
 
-## Takeaways (preliminary)
+Average accuracy, rewrite arms vs the matching repeat arm (repeat: 57.0 at k=2, 56.6 at k=4):
+
+| method | k=2 | k=4 |
+|---|---|---|
+| repeat (real) | 57.0 | 56.6 |
+| iid | 57.5 (+0.5) | 57.0 (+0.4) |
+| t12 | 56.1 (-0.9) | 56.1 (-0.5) |
+| **nemo** | **58.8 (+1.8)** | **58.9 (+2.3)** |
+| wofmt | 56.6 (-0.4) | 56.9 (+0.3) |
+| gacha | 56.4 (-0.6) | 56.6 (+0.0) |
+
+## Takeaways
 
 1. **Repeating real data barely hurts at 2-4 epochs.**
    - 2xS2 scores 57.0 and 4xS2 56.6, vs 56.3 for R with fresh data.
    - heldout PPL is 13.03 / 13.07 vs 13.00.
-   - At this scale repetition hasn't started to bite, so the repeat arms are a strong baseline.
-2. **iid rewrites help only slightly and saturate by k=2.**
-   - +0.5 over repeat at k=2 (57.5 vs 57.0) and +0.4 at k=4 (57.0 vs 56.6), close to noise. k=4 scores lower than k=2.
-   - They cost ~0.6-0.7 heldout PPL and gold BPB gets worse (0.952 / 0.962).
-3. **The Nemotron-CC prompt mixture is clearly best.**
-   - 58.8 / 58.9, i.e. +1.8 / +2.3 over the matching repeat arm.
+   - At this scale repetition hasn't started to bite, so the repeat arms are a strong baseline that most rewrite methods fail to beat.
+2. **Only the Nemotron-CC prompt mixture clearly beats repetition.**
+   - 58.8 / 58.9, i.e. +1.8 / +2.3 over repeat.
    - Gains are broad: TQA +2.7-3.3, ARC-E +2.5-4.1, SciQ +2.0-3.4, MMLU +1.1-1.3.
-   - It holds up at k=4, and gold BPB stays at the repeat-arm level (0.937 / 0.930).
+   - It holds up at k=4, and its gold BPB stays at the repeat level (0.937 / 0.930).
    - Caveats:
-     - Its short rewrites are repeated ~2x vs ~1.3x for iid, which works against it.
-     - Part of the gain may come from the QA / knowledge-list formats themselves rather than from diversity alone.
-4. **Higher temperature hurts.** T=1.2 k=2 scores 56.1, below both iid k=2 and the repeat arms; TQA falls to 25.5. This is consistent with its unfiltered degenerate outputs. The one oddity is the best MBPP BPB (0.837).
-5. **Every rewrite arm loses on heldout DCLM PPL** (13.6-13.8 vs 13.0), as in the generator-scaling runs. Downstream accuracy and in-distribution PPL disagree.
+     - Its short rewrites are repeated ~2x vs ~1.1-1.3x for the other methods, which works against it.
+     - The gain plausibly comes from the QA / knowledge-list *tasks* (new formats that elicit knowledge) rather than from diversity per se.
+3. **The other "diverse" generation methods do not help.**
+   - Within noise of repeat, or worse: iid +0.5 / +0.4, WebOrganizer formats -0.4 / +0.3, Gacha -0.6 / +0.0, T=1.2 -0.9 / -0.5.
+   - More views (k=4) do not help any method relative to k=2.
+   - Gacha and WebOrganizer formats change surface form (genre, register, structure) but the content is still a paraphrase of the same document. Nemotron's QA / extraction formats are the only ones that change *what is asked of the content*.
+4. **Higher temperature hurts** (56.1 at both k). TQA falls to 25.5, consistent with the ~2.4% unfiltered degenerate outputs.
+5. **Every rewrite arm loses on in-distribution likelihood.**
+   - heldout DCLM PPL 13.6-13.8 vs 13.0.
+   - Gold BPB is worse (0.946-0.962) for all methods except nemo, mostly from TriviaQA BPB.
+   - Downstream accuracy and likelihood metrics disagree.
 
-So far: prompt (format) diversity helps; diversity from a higher sampling temperature does not; plain iid
-resampling saturates by k=2. The wofmt and gacha arms, still pending, test whether format diversity
-without the QA/extraction tasks, and structured decoding diversity, behave like nemo or like iid.
+So, for "augmentation across epochs": what you ask the generator to *do* with a document matters more than
+how diverse the samples are. Surface-form diversity (temperature, genre / format, Gacha's decision axes)
+doesn't beat simply repeating the real data at 2-4 epochs; task diversity (QA, distillation, knowledge
+lists) does, by ~2 points.
 
 ## Reproduce
 
 ```
 .venv/bin/python analysis/results_viewer/genscale_table.py r_lr5p3e3_wd01 s2x2_lr5p3e3_wd01 s1_rw9bwiki_lr5p3e3_wd01 \
     mr_repeat_k2_lr5p3e3_wd01 mr_repeat_k4_lr5p3e3_wd01 mr_iid_k2_lr5p3e3_wd01 mr_iid_k4_lr5p3e3_wd01 \
-    mr_nemo_k2_lr5p3e3_wd01 mr_nemo_k4_lr5p3e3_wd01 mr_t12_k2_lr5p3e3_wd01
+    mr_t12_k2_lr5p3e3_wd01 mr_t12_k4_lr5p3e3_wd01 mr_nemo_k2_lr5p3e3_wd01 mr_nemo_k4_lr5p3e3_wd01 \
+    mr_wofmt_k2_lr5p3e3_wd01 mr_wofmt_k4_lr5p3e3_wd01 mr_gacha_k2_lr5p3e3_wd01 mr_gacha_k4_lr5p3e3_wd01
 ```
