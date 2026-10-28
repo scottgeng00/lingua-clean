@@ -6,7 +6,7 @@ so the result stays a uniform sample disjoint from every training subset. Only t
 holding the new rows are read from the Hub (HTTP range reads), not the whole 550 GB. Existing held-out
 lines keep their order; new ones are appended. The val file is replaced atomically.
 
-    .venv-kd/bin/python setup/extend_fineweb_edu_heldout.py --total 10000
+    .venv-kd/bin/python -m setup.extend_fineweb_edu_heldout --total 10000
 """
 
 import argparse
@@ -30,17 +30,8 @@ def path(fi):
     return f"datasets/{REPO}/{SUBDIR}/train-{fi:05d}-of-{N_FILES:05d}.parquet"
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--out", default=OUT)
-    ap.add_argument("--total", type=int, default=10_000)
-    a = ap.parse_args()
-    val = f"{a.out}/{HELDOUT}/{HELDOUT}.val.jsonl"
-    old = [orjson.loads(l) for l in open(val, "rb")]
-    n_new = a.total - len(old)
-    assert n_new > 0, f"held-out already has {len(old)} docs"
-    fs = HfFileSystem()
-
+def corpus_meta(fs):
+    """Per-file (num_rows, row-group sizes), file row offsets, and the total row count."""
     def meta(fi):
         with fs.open(path(fi)) as f:
             m = pq.ParquetFile(f).metadata
@@ -49,45 +40,46 @@ def main():
     with ThreadPoolExecutor(32) as ex:
         metas = list(ex.map(meta, range(N_FILES)))
     counts = np.array([m[0] for m in metas])
-    total = int(counts.sum())
-    offsets = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    return metas, np.concatenate([[0], np.cumsum(counts)[:-1]]), int(counts.sum())
 
-    # Rows of the original draw (training subsets + existing held-out), regenerated from its seed.
-    n_orig = N_SUBSETS * SUBSET_ROWS + len(old)
-    used = np.random.default_rng(SEED).choice(total, size=n_orig, replace=False)
-    assert used[N_SUBSETS * SUBSET_ROWS:].tolist() == [r["src_row"] for r in old], "seed mismatch"
-    used = np.sort(used)
 
-    # Uniform draw from the unused rows: rejection-sample candidates until n_new distinct unused ones.
-    rng = np.random.default_rng(EXTEND_SEED)
-    new = []
-    seen = set()
-    while len(new) < n_new:
-        for r in rng.integers(0, total, size=4 * n_new).tolist():
-            i = np.searchsorted(used, r)
-            if (i < len(used) and used[i] == r) or r in seen:
+def original_draw(total, n_heldout):
+    """Global rows of the original seeded draw: 4 x 8M training rows, then the first n_heldout held-out rows."""
+    return np.random.default_rng(SEED).choice(total, size=N_SUBSETS * SUBSET_ROWS + n_heldout, replace=False)
+
+
+def draw_unused(total, exclude_sorted, n, seed):
+    """n distinct rows drawn uniformly from [0, total) minus exclude_sorted (rejection sampling)."""
+    rng = np.random.default_rng(seed)
+    out, seen = [], set()
+    while len(out) < n:
+        for r in rng.integers(0, total, size=4 * n).tolist():
+            i = np.searchsorted(exclude_sorted, r)
+            if (i < len(exclude_sorted) and exclude_sorted[i] == r) or r in seen:
                 continue
             seen.add(r)
-            new.append(r)
-            if len(new) == n_new:
+            out.append(r)
+            if len(out) == n:
                 break
-    print(f"{total:,} rows, {n_orig:,} used; drawing {n_new:,} new held-out docs (seed {EXTEND_SEED})", flush=True)
+    return out
 
-    # Group by (file, row group) and read only those row groups.
+
+def fetch_rows(fs, metas, offsets, rows):
+    """{global row: record} for the given rows, reading only the row groups that hold them."""
     by_file = {}
-    for r in new:
+    for r in rows:
         fi = int(np.searchsorted(offsets, r, side="right") - 1)
         by_file.setdefault(fi, []).append(r - int(offsets[fi]))
 
     def fetch(fi):
         starts = np.concatenate([[0], np.cumsum(metas[fi][1])])
-        rows = sorted(by_file[fi])
-        groups = sorted({int(np.searchsorted(starts, lr, side="right") - 1) for lr in rows})
+        local = sorted(by_file[fi])
+        groups = sorted({int(np.searchsorted(starts, lr, side="right") - 1) for lr in local})
         with fs.open(path(fi)) as f:
             t = pq.ParquetFile(f).read_row_groups(groups, columns=["id", "text", "metadata"]).flatten()
         base = {g: k for k, g in zip(np.cumsum([0] + [metas[fi][1][g] for g in groups[:-1]]), groups)}
         out = {}
-        for lr in rows:
+        for lr in local:
             g = int(np.searchsorted(starts, lr, side="right") - 1)
             i = int(base[g] + lr - starts[g])
             out[int(offsets[fi]) + lr] = {
@@ -101,7 +93,26 @@ def main():
     with ThreadPoolExecutor(32) as ex:
         for out in ex.map(fetch, sorted(by_file)):
             recs.update(out)
-    assert len(recs) == n_new
+    assert len(recs) == len(set(rows))
+    return recs
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default=OUT)
+    ap.add_argument("--total", type=int, default=10_000)
+    a = ap.parse_args()
+    val = f"{a.out}/{HELDOUT}/{HELDOUT}.val.jsonl"
+    old = [orjson.loads(l) for l in open(val, "rb")]
+    n_new = a.total - len(old)
+    assert n_new > 0, f"held-out already has {len(old)} docs"
+    fs = HfFileSystem()
+    metas, offsets, total = corpus_meta(fs)
+    used = original_draw(total, len(old))
+    assert used[N_SUBSETS * SUBSET_ROWS:].tolist() == [r["src_row"] for r in old], "seed mismatch"
+    new = draw_unused(total, np.sort(used), n_new, EXTEND_SEED)
+    print(f"{total:,} rows, {len(used):,} used; drawing {n_new:,} new held-out docs (seed {EXTEND_SEED})", flush=True)
+    recs = fetch_rows(fs, metas, offsets, new)
     rows = old + [recs[r] for r in new]
     assert len({r["src_row"] for r in rows}) == a.total
 

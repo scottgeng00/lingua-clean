@@ -27,6 +27,9 @@ class OptimArgs:
     cosine_theta: float = 1.0
     annealing_step: int = 1000
     decay_fraction: float = 0.1
+    # Weight decay only on 2D matrices except the (tied) token embedding; none on norm gains
+    # (RMSNorm / QK-norm) or the embedding / LM head. Off by default (decay everything).
+    decay_matrices_only: bool = False
 
     exp_factor: float = 0.5
 
@@ -108,6 +111,17 @@ def lr_wsd(
     return lr
 
 
+def lr_wsd_sqrt(step: int, warmup: int, n_steps: int, decay_fraction: float) -> float:
+    """Warmup-stable-decay: linear 0 -> 1 over `warmup` steps, constant, then over the last
+    `decay_fraction` of the steps 1 - sqrt((s - s0) / (S - s0)), reaching exactly 0 at S."""
+    s0 = n_steps - round(n_steps * decay_fraction)
+    if step < warmup:
+        return step / warmup
+    if step < s0:
+        return 1.0
+    return max(0.0, 1.0 - math.sqrt(min(1.0, (step - s0) / (n_steps - s0))))
+
+
 def build_lr_fn(args: OptimArgs, n_steps: int):
     if args.scheduler == "constant":
         lr_fn = lambda x: 1.0
@@ -141,6 +155,8 @@ def build_lr_fn(args: OptimArgs, n_steps: int):
             cycle_length=args.cycle_length,
             min_ratio=args.lr_min_ratio,
         )
+    elif args.scheduler == "wsd_sqrt":
+        lr_fn = partial(lr_wsd_sqrt, warmup=args.warmup, n_steps=n_steps, decay_fraction=args.decay_fraction)
     else:
         raise NotImplementedError(f"Unknown scheduler: {args.scheduler}")
     return lr_fn
@@ -148,8 +164,21 @@ def build_lr_fn(args: OptimArgs, n_steps: int):
 
 def build_optimizer(model: nn.Module, args: OptimArgs, n_steps: int):
     logger.info("Starting build of optimizer...")
+    if args.decay_matrices_only:
+        decay, no_decay = [], []
+        for name, p in model.named_parameters():
+            if not p.requires_grad:
+                continue
+            (decay if p.ndim >= 2 and "tok_embeddings" not in name else no_decay).append(p)
+        params = [{"params": decay, "weight_decay": args.weight_decay},
+                  {"params": no_decay, "weight_decay": 0.0}]
+        logger.info(f"Weight decay {args.weight_decay} on {len(decay)} matrices "
+                    f"({sum(p.numel() for p in decay):,} params); none on {len(no_decay)} tensors "
+                    f"({sum(p.numel() for p in no_decay):,} params: norms, embedding / LM head)")
+    else:
+        params = model.parameters()
     optimizer = AdamW(
-        model.parameters(),
+        params,
         lr=args.lr,
         betas=(args.beta1, args.beta2),
         weight_decay=args.weight_decay,
