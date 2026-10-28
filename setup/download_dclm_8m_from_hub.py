@@ -17,7 +17,7 @@ import pyarrow.parquet as pq
 from huggingface_hub import snapshot_download
 
 REPO = "scottgeng00/dclm-8m"
-SPLITS = ["dclm_8m_0", "dclm_8m_1"]
+SPLITS = ["dclm_8m_0", "dclm_8m_1", "dclm_8m_2", "dclm_8m_3"]
 N_CHUNKS = 16
 
 
