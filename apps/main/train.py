@@ -35,6 +35,7 @@ from lingua.data import (
     build_dataloader_from_args,
     init_dataloader_state_from_args,
 )
+from lingua.token_stream import TokenStream, init_token_stream_state, token_stream_batches
 from lingua.online_data import (
     ExcessLossController,
     OnlineReweightingArgs,
@@ -1902,6 +1903,9 @@ class TrainArgs:
 
     # If set to None, eval is run locally otherwise it launches a new job with the given number of gpus
     async_eval_gpus: Optional[int] = None
+    # Expected parameter counts {"body": ..., "embedding": ..., "output": ...}; checked to 0.1% at model build.
+    # body = everything except the input embedding and the (untied) output head.
+    expected_params: Optional[Dict[str, int]] = None
     eval: Optional[Any] = None
     eval_backend: str = "harness"  # "harness" (lm-eval) or "olmes"
 
@@ -1932,9 +1936,11 @@ def validate_train_args(args: TrainArgs, output_size: int):
     if args.model.vocab_size < 0:
         logger.info(f"Setting model output size to {output_size}")
         args.model.vocab_size = output_size
+    # A padded vocabulary (e.g. Qwen3's 151,936 rows for a 151,669-token tokenizer) is allowed; the extra rows
+    # never appear as inputs or targets.
     assert (
-        args.model.vocab_size == output_size
-    ), "Vocab size should be the same as output size"
+        args.model.vocab_size >= output_size
+    ), f"Vocab size {args.model.vocab_size} is smaller than the tokenizer's {output_size}"
 
     assert args.dump_dir, "Dump dir not set"
 
@@ -2288,6 +2294,13 @@ def train(args: TrainArgs):
         logger.info("Model is built !")
 
         model_param_count = get_num_params(model)
+        n_emb = model.tok_embeddings.weight.numel()
+        n_out = 0 if args.model.weight_tying else model.output.weight.numel()
+        counts = {"body": model_param_count - n_emb - n_out, "embedding": n_emb, "output": n_out}
+        logger.info(f"Parameters: body {counts['body']:,}, input embedding {n_emb:,}, output head {n_out:,}, "
+                    f"total {model_param_count:,}")
+        for k, want in (args.expected_params or {}).items():
+            assert abs(counts[k] - want) <= 1e-3 * want, f"{k} parameters {counts[k]:,} != expected {want:,}"
 
         model = parallelize_model(
             model,
@@ -2475,9 +2488,12 @@ def train(args: TrainArgs):
 
         # build optimizer after apply parallelisms to the model
         optimizer, scheduler = build_optimizer(model, args.optim, args.steps)
-        data_loader_state = init_dataloader_state_from_args(
-            args.data, dp_rank, dp_degree
-        )
+        if args.data.token_stream_dir:
+            data_loader_state = init_token_stream_state()
+        else:
+            data_loader_state = init_dataloader_state_from_args(
+                args.data, dp_rank, dp_degree
+            )
 
         train_state = TrainState(
             step=0,
@@ -2637,12 +2653,19 @@ def train(args: TrainArgs):
         else:
             online_loader = None
             online_ctrl = None
-            data_loader = context_stack.enter_context(
-                build_dataloader_from_args(
-                    args.data,
-                    state=train_state.data_loader_state,
+            if args.data.token_stream_dir:
+                stream = TokenStream(args.data.token_stream_dir, args.data.token_stream_mode,
+                                     args.data.token_stream_tokens, args.data.seq_len, args.data.token_stream_seed)
+                logger.info(f"Token stream resumes at global sequence {train_state.data_loader_state['next_seq']:,}")
+                data_loader = token_stream_batches(stream, args.data.batch_size, dp_rank, dp_degree,
+                                                   train_state.data_loader_state)
+            else:
+                data_loader = context_stack.enter_context(
+                    build_dataloader_from_args(
+                        args.data,
+                        state=train_state.data_loader_state,
+                    )
                 )
-            )
         # ─────────────────────────────────────────────────────────────────────
         torch_profiler = context_stack.enter_context(
             maybe_run_profiler(args.dump_dir, model, args.profiling)
@@ -7403,7 +7426,7 @@ def train(args: TrainArgs):
             saved = False
             is_dump_step = every_n_steps(
                 train_state, args.checkpoint.dump.every, acc_step=0
-            )
+            ) or (train_state.acc_step == 0 and train_state.step in args.checkpoint.extra_save_steps)
             # the last step counts as an eval step too, so the final checkpoint is saved
             # here and evaluated even when steps isn't a multiple of eval.every
             is_eval_step = every_n_steps(train_state, args.checkpoint.eval.every, acc_step=0) or (

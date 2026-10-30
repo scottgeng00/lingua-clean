@@ -31,7 +31,7 @@ import wandb
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
 
-from apps.main.eval import ValidationArgs, eval_on_val
+from apps.main.eval import ValidationArgs, eval_on_token_streams, eval_on_val
 from apps.main.generate import (
     PackedCausalTransformerGenerator,
     PackedCausalTransformerGeneratorArgs,
@@ -91,6 +91,10 @@ class OlmesArgs:
     # (6x faster end to end). Loglikelihood scores are identical; sampled tasks (gsm8k pass@k)
     # draw different samples, as vLLM's random stream depends on batching.
     batch_size: str = "auto"
+    # Paloma (hf rolling loglikelihood): score each doc with its first token as context instead of an EOT prefix.
+    # Models trained with document masking and no BOS never see EOT at position 0; with the prefix, mean Paloma BPB
+    # varied by 0.05 across seeds of one config (short-doc sources by up to 0.6 nats/token), without it ~0.001.
+    rolling_no_prefix: bool = True  # default since 2026-10-29; Paloma also written to metrics.paloma_np.jsonl
 
 
 @dataclass
@@ -145,7 +149,9 @@ def do_gpu_work(cfg: OlmesEvalArgs):
         )
         model.eval()
         generator = PackedCausalTransformerGenerator(cfg.generator, model, tokenizer)
-        val_results = eval_on_val(generator, cfg.validation, train_cfg)
+        val_results = eval_on_val(generator, cfg.validation, train_cfg) if cfg.validation.sources else {}
+        if cfg.validation.token_streams:
+            val_results.update(eval_on_token_streams(model, cfg.validation))
 
         Path(cfg.dump_dir).mkdir(parents=True, exist_ok=True)
         with open(Path(cfg.dump_dir) / "validation.json", "w") as f:
@@ -283,6 +289,8 @@ def _olmes_cmd(hf_path: str, olmes_args: OlmesArgs, tasks: List[str], output_dir
     }
     if olmes_args.model_type == "vllm":  # the hf backend passes unknown args on to from_pretrained
         model_args["gpu_memory_utilization"] = olmes_args.gpu_memory_utilization
+    elif olmes_args.rolling_no_prefix and any(t.endswith("::paloma") for t in tasks):
+        model_args["rolling_no_prefix"] = True
     # Newer OLMES rejects unknown model args ("Hashing error! Key tokenizer_revision
     # not in defaults"), so only pass a revision when one is actually requested.
     if olmes_args.tokenizer_revision and olmes_args.tokenizer_revision != "main":
@@ -504,6 +512,12 @@ def launch_olmes_eval(cfg: OlmesEvalArgs):
             logger.info(f"Writing OLMES metric logs to {metric_log_path}")
             with open(metric_log_path, mode="a") as f:
                 print(json.dumps(timestamp | olmes_results), file=f, flush=True)
+            # Paloma scored without the EOT prefix also goes where apps/main/rescore_paloma.py writes, so runs
+            # evaluated with the new default and rescored older runs are read from the same file.
+            paloma = {k: v for k, v in olmes_results.items() if "::paloma/" in k}
+            if paloma and cfg.olmes.rolling_no_prefix:
+                with open(Path(cfg.metric_log_dir) / "metrics.paloma_np.jsonl", mode="a") as f:
+                    print(json.dumps(timestamp | {"rolling_no_prefix": True} | paloma), file=f, flush=True)
 
         if val_results is not None:
             val_log_path = Path(cfg.metric_log_dir) / "metrics.validation.jsonl"

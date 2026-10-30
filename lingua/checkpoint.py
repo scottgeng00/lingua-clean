@@ -63,6 +63,11 @@ class CheckpointArgs:
     path: Optional[str] = None
     init_ckpt_path: Optional[str] = None
     continue_training_from_init: bool = False
+    # Extra checkpoint steps, never removed by the dump / eval rotation (e.g. the start points of decay branches).
+    extra_save_steps: List[int] = field(default_factory=list)
+    # Decay branch: a checkpoint folder of another run (.../checkpoints/<step>). While this run has no checkpoint of
+    # its own it starts from that one, with full state (model, optimizer, step, scheduler, data position).
+    branch_from: Optional[str] = None
 
 
 def _get_key_step(name: str):
@@ -125,6 +130,8 @@ class CheckpointManager:
         self.eval_every = args.eval
         self.init_ckpt_path = args.init_ckpt_path
         self.continue_training_from_init = args.continue_training_from_init
+        self.extra_save_steps = set(args.extra_save_steps or [])
+        self.branch_from = args.branch_from
 
         assert os.path.exists(self.path), f"Path {self.path} does not exist and needs to be created before using CheckpointManager (use instantiate_and_make_dir)"
 
@@ -151,7 +158,7 @@ class CheckpointManager:
                 dump_folders.append(p)
             if is_eval:
                 eval_folders.append(p)
-            if not (is_dump or is_eval):
+            if not (is_dump or is_eval) or _get_key_step(p.name) in self.extra_save_steps:
                 other_folders.append(p)
 
         logger.info(f"Dump folders: {dump_folders}")
@@ -287,6 +294,10 @@ class CheckpointManager:
         dp_rank, tp_rank = self._get_dp_tp_mesh(device_mesh)
         # Loading tries to load the provided path, if not available the last saved step and finally from the init path
         path = path or self.get_last_step_path(dp_rank=dp_rank)
+        if path is None and self.branch_from:
+            path = Path(self.branch_from)
+            assert (path / TRAIN_STATE_NAME.format(0)).is_file(), f"branch_from {path} has no train state"
+            logger.info(f"Starting decay branch from {path}")
         # If none of those are available don't do anything
         if path is None:
             # If no checkpoints exist do nothing
@@ -294,6 +305,12 @@ class CheckpointManager:
 
         # Only load train state if it's provided, the files exist and we're not loading from init path
         train_state_name = TRAIN_STATE_NAME.format(dp_rank)
+        if not (path / train_state_name).is_file():
+            # Loaded with more data-parallel ranks than it was saved with (e.g. a branch on more GPUs). Only valid when
+            # the loader state is rank-independent, as for the token stream (a global sequence index).
+            with open(path / TRAIN_STATE_NAME.format(0)) as f:
+                assert json.load(f)["data_loader_state"].get("token_stream"), f"{path} has no {train_state_name}"
+            train_state_name = TRAIN_STATE_NAME.format(0)
         logger.info("Reloading train state")
         with open(path / train_state_name, "r") as f:
             train_state_dict = json.load(f)

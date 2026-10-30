@@ -5,14 +5,17 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import json
 import logging
+import math
 import os
 from pathlib import Path
 from lm_eval.api.instance import Instance
 from lm_eval.api.model import LM
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from lm_eval import simple_evaluate
 from omegaconf import OmegaConf
+import numpy as np
 import torch
+import torch.nn.functional as F
 import wandb
 from apps.main.generate import (
     PackedCausalTransformerGenerator,
@@ -73,6 +76,13 @@ class ValidationArgs:
     use_val_from_train_src: bool = True # Use the validation set from training sources
     root_dir: str = ""
     sources: List[str] = field(default_factory=list) # Other sources to eval on
+    # Packed validation on pre-tokenized streams (setup/pretokenize_dclm_qwen3.py, with doc_bytes.npy), one directory
+    # each, reported under the directory's name. Documents are packed into seq_len sequences with document masking
+    # exactly as in training; every token except each document's first is scored. Reports token-weighted
+    # cross-entropy and bits per byte. (A list, not a dict: dataclass_from_dict makes dicts struct, so keys can't be
+    # added.)
+    token_streams: List[str] = field(default_factory=list)
+    token_stream_seq_len: int = 4096
 
 @dataclass
 class EvalArgs:
@@ -185,6 +195,43 @@ class EvalHarnessLM(LM):
         self.generator.max_gen_len = max_gen_len
 
         return results
+
+
+@torch.inference_mode()
+def eval_on_token_streams(model, val_args: ValidationArgs) -> Dict[str, Dict[str, float]]:
+    """Token-weighted validation cross-entropy (nats/token) and bits per byte on packed pre-tokenized streams.
+
+    The stream is cut into consecutive seq_len windows with lingua's one-token overlap (inputs = tokens[i*L:(i+1)*L],
+    labels shifted by one), and attention is masked per document (cu_seqlens), as in training. Labels that start a
+    document (predicted from the previous document's end-of-document token) are not scored. bits per byte = total
+    nats / ln 2 / total UTF-8 bytes of the documents' text.
+    """
+    L = val_args.token_stream_seq_len
+    results = {}
+    for path in val_args.token_streams:
+        name = os.path.basename(os.path.normpath(path))
+        tokens = np.memmap(os.path.join(path, "tokens.bin"), dtype=np.uint32, mode="r")
+        offsets = np.load(os.path.join(path, "doc_offsets.npy"))
+        n_bytes = int(np.load(os.path.join(path, "doc_bytes.npy")).sum())
+        doc_start = np.zeros(len(tokens) + 1, dtype=bool)
+        doc_start[offsets[:-1]] = True
+        nll_sum, n_scored = 0.0, 0
+        for a in range(0, len(tokens) - 1, L):
+            b = min(a + L + 1, len(tokens))
+            toks = torch.from_numpy(np.asarray(tokens[a:b], dtype=np.int64)).cuda()
+            m = b - a - 1
+            starts = [int(x) - a for x in offsets[(offsets > a) & (offsets < a + m)]]
+            cu = [0] + starts + [m]
+            cu_t = torch.tensor(cu, dtype=torch.int32, device="cuda")
+            logits = model(toks[None, :-1], target=None, cu_seqlens=cu_t, max_seqlen=max(np.diff(cu)))
+            nll = F.cross_entropy(logits[0].float(), toks[1:], reduction="none")
+            keep = ~torch.from_numpy(doc_start[a + 1:b]).cuda()
+            nll_sum += nll[keep].double().sum().item()
+            n_scored += int(keep.sum().item())
+        results[name] = {"ce_per_token": nll_sum / n_scored, "bpb": nll_sum / math.log(2) / n_bytes,
+                         "nll_sum": nll_sum, "tokens_scored": n_scored, "bytes": n_bytes, "docs": len(offsets) - 1}
+        logger.info(f"Packed validation on {name}: {results[name]}")
+    return results
 
 
 def eval_on_val(generator, val_args: ValidationArgs, train_cfg):

@@ -1,0 +1,77 @@
+# Throughput benchmark (16 GPUs, 128 seqs/step, full_shard, dp_shard 1); from lrsweep/dclm_bs128_lr2p00e3.
+async_eval_gpus: null
+checkpoint:
+  dump:
+    every: 100000
+    keep: 1
+  eval:
+    every: 100000
+    keep: 1
+  init_ckpt_path: null
+data:
+  add_bos: false
+  add_eos: true
+  batch_size: 8
+  disable_cross_doc_attn: true
+  load_async: true
+  n_views: 2
+  prefetch_size: 64
+  root_dir: /home/sgeng/scottg/pretrain/assets/data
+  seed: 42
+  seq_len: 4096
+  sources:
+    dclm_subsets/dclm_8m_0: 1.0
+    dclm_subsets/dclm_8m_1: 1.0
+  tokenizer:
+    name: hf
+    path: /home/sgeng/scottg/pretrain/assets/models/Qwen3.5-2B-tokenizer-eot
+distributed:
+  compile: true
+  fsdp_type: full_shard
+  matmul_allow_tf32: true
+  model_dtype: bf16
+  selective_activation_checkpointing: false
+  tp_size: 1
+  dp_shard: 1
+dump_dir: ${oc.env:MIDTRAIN_ROOT}/experiments/lrsweep_bench/fs_16g_bs128
+eval: null
+eval_backend: olmes
+grad_acc_steps: 1
+logging:
+  freq: 10
+  wandb: null
+model:
+  dim: 1024
+  ffn_dim_multiplier: 1.125
+  head_dim: 128
+  hf_arch: Qwen3ForCausalLM
+  init_base_std: 0.02
+  max_seqlen: 4096
+  multiple_of: 256
+  n_heads: 16
+  n_kv_heads: 8
+  n_layers: 28
+  norm_eps: 1.0e-06
+  post_norm: false
+  qk_norm: true
+  qk_norm_per_head: true
+  rope_theta: 1000000
+  seed: 42
+  weight_tying: true
+name: lrsweep-bench-fs-16g-bs128
+optim:
+  beta1: 0.9
+  beta2: 0.95
+  clip: 1.0
+  decay_fraction: 0.2
+  decay_matrices_only: true
+  epsilon: 1.0e-08
+  lr: 0.002
+  scheduler: wsd_sqrt
+  warmup: 381
+  weight_decay: 0.1
+probe_freq: null
+profiling:
+  run: false
+seed: 777
+steps: 400

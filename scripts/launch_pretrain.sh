@@ -76,6 +76,9 @@ fi
 if [ -n "${SLURM_EXCLUDE:-}" ]; then   # e.g. nodes that threw hardware errors
     SBATCH_CMD+=(--exclude="${SLURM_EXCLUDE}")
 fi
+if [ -n "${SLURM_DEPENDENCY:-}" ]; then   # e.g. afterany:<jobid> to serialize jobs under a GPU cap
+    SBATCH_CMD+=(--dependency="${SLURM_DEPENDENCY}")
+fi
 
 # The inner script keys off RECIPE / RECIPE_YAML — pass our pretrain config
 # values through those names so we don't have to fork the inner script.

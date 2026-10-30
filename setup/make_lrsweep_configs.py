@@ -11,9 +11,10 @@ linear warmup 0 -> peak over the first 200M tokens (1%), constant, then 1 - sqrt
 
 Grid (tokens/step, seqs/step, steps, LRs):
     262,144    64   76,294   7.07e-4 1.00e-3 1.41e-3 2.00e-3 2.83e-3
-    524,288   128   38,147   1.00e-3 1.41e-3 2.00e-3 2.83e-3 4.00e-3
-  1,048,576   256   19,073   1.41e-3 2.00e-3 2.83e-3 4.00e-3 5.66e-3
-plus 2 extra seeds (model init and data order both changed) at 524,288 / 2.00e-3, for each dataset.
+    524,288   128   38,147   7.07e-4 1.00e-3 1.41e-3 2.00e-3 2.83e-3 4.00e-3  (7.07e-4 added later)
+  1,048,576   256   19,073   7.07e-4 1.00e-3 1.41e-3 2.00e-3 2.83e-3 4.00e-3 5.66e-3  (7.07e-4, 1.00e-3 added after the first results)
+plus 2 extra seeds (model init and data order both changed) at 524,288 / 2.00e-3, for each dataset,
+and the single-dataset runs in EXTRA_RUNS.
 
 Data (Qwen3.5 tokens, counted exactly incl. one EOS per doc; data/token_counts_qwen35.json):
   dclm:   dclm_8m_0 + dclm_8m_1, 1:1 per document.
@@ -45,9 +46,10 @@ FWEDU2_DOCS = 3_968_000  # 16.27B (fwedu_8m_0 + _1) + 3.968M x 1017.7 = 20.31B t
 
 GRID = {
     262_144: (76_294, ["7.07e-4", "1.00e-3", "1.41e-3", "2.00e-3", "2.83e-3"]),
-    524_288: (38_147, ["1.00e-3", "1.41e-3", "2.00e-3", "2.83e-3", "4.00e-3"]),
-    1_048_576: (19_073, ["1.41e-3", "2.00e-3", "2.83e-3", "4.00e-3", "5.66e-3"]),
+    524_288: (38_147, ["7.07e-4", "1.00e-3", "1.41e-3", "2.00e-3", "2.83e-3", "4.00e-3"]),
+    1_048_576: (19_073, ["7.07e-4", "1.00e-3", "1.41e-3", "2.00e-3", "2.83e-3", "4.00e-3", "5.66e-3"]),
 }
+EXTRA_RUNS = [("dclm", 1_048_576, "5.00e-4")]  # (dataset, tokens/step, lr): further low end for batch 256
 CENTER = (524_288, "2.00e-3")
 EXTRA_SEEDS = [1, 2]
 
@@ -145,6 +147,12 @@ def main():
                         f.write(header)
                         yaml.safe_dump(cfg, f, sort_keys=False, width=120)
                     print(name, steps)
+    for dataset, tps, lr in EXTRA_RUNS:
+        name, header, cfg = config(dataset, tps, GRID[tps][0], lr, 0)
+        with open(f"{OUT}/{name}.yaml", "w") as f:
+            f.write(header)
+            yaml.safe_dump(cfg, f, sort_keys=False, width=120)
+        print(name, GRID[tps][0])
 
 
 if __name__ == "__main__":

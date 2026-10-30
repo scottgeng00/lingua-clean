@@ -1548,6 +1548,13 @@ class DataArgs:
     source_max_docs: Dict[str, int] = field(default_factory=dict)
     # Read every epoch after the first in a fresh seeded permutation instead of file order.
     shuffle_each_epoch: bool = False
+    # Pre-tokenized stream (lingua/token_stream.py) instead of jsonl sources: the batch at each step is a fixed
+    # function of the step. mode "unique" reads token_stream_tokens tokens once; "repeat" cycles a pool of exactly
+    # token_stream_tokens tokens, re-shuffled (seeded by token_stream_seed and the pass) and repacked every pass.
+    token_stream_dir: Optional[str] = None
+    token_stream_mode: str = "unique"
+    token_stream_tokens: Optional[int] = None
+    token_stream_seed: int = 0
 
     # Synthetic context (kept for orig_data compatibility)
     synth_context_mode: Optional[str] = None
