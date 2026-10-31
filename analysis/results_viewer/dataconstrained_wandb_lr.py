@@ -45,7 +45,7 @@ def main():
     run = wandb.init(project="lingua-clean-dataconstrained", name="lr-curves", id="lr-curves", resume="allow",
                      job_type="analysis")
     log = {}
-    for width in (512, 1152):
+    for width in (512, 768, 1152):
         fig, axes = plt.subplots(2, 4, figsize=(19, 8.5))
         for i, metric in enumerate(("val_ce", "paloma")):
             for j, (stage, pt, wd, title) in enumerate(PANELS):

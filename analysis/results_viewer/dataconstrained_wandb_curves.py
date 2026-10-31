@@ -20,18 +20,22 @@ sys.argv = sys.argv[:1]
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dataconstrained_grid as G  # noqa: E402
 
-FINALS = {512: "w512_s2final_bs64_lr6e-3_wd0p3", 1152: "w1152_s2final_bs128_lr1p5e-3_wd0p3"}
-CONFIG = {512: "LR 6e-3, batch 64, wd 0.3", 1152: "LR 1.5e-3, batch 128, wd 0.3"}
+FINALS = {512: "w512_s2final_bs64_lr6e-3_wd0p3", 768: "w768_s2final_bs64_lr2e-3_wd0p3", 1152: "w1152_s2final_bs128_lr1p5e-3_wd0p3"}
+CONFIG = {512: "LR 6e-3, batch 64, wd 0.3", 768: "LR 2e-3, batch 64, wd 0.3", 1152: "LR 1.5e-3, batch 128, wd 0.3"}
 SERIES = {"seed 0": "#2a78d6", "seed 1": "#eb6834", "unique data (stage 1 best)": "#1baf7a"}
 INK, MUTED, GRID = "#1f1f1e", "#6b6a63", "#e6e5df"
 OUT = "/checkpoint/mnm/sgeng/pretrain/logs/reports/dataconstrained_repetition_curves.png"
 
 
 def curve(width, seed, metric):
-    """[(pass, value)] over passes 1-16 of the final run and the extension (20, 24, 28, 32) where evaluated."""
+    """[(pass, value)] over passes 1-16 of the final run and the extension (20, 24, 28, 32) where evaluated. A width
+    whose final run is 32 passes from scratch (w768) has every point under ..._x32[_pK]."""
     base = FINALS[width] + ("_seed1" if seed else "")
     names = {k: (base if k == 16 else f"{base}_p{k}") for k in range(1, 17)}
     names.update({k: (f"{base}_x32" if k == 32 else f"{base}_x32_p{k}") for k in (20, 24, 28, 32)})
+    for k in range(1, 17):
+        if names[k] not in G.M:
+            names[k] = f"{base}_x32_p{k}"
     pts = []
     for k, n in sorted(names.items()):
         if n in G.M:
@@ -57,7 +61,7 @@ def main():
             for w in FINALS for m in ("val_ce", "paloma")}
     label = {"val_ce": "dclm_heldout val loss (nats/token)", "paloma": "Paloma BPB (mean of 16)"}
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8.5))
+    fig, axes = plt.subplots(2, len(FINALS), figsize=(6 * len(FINALS), 8.5))
     for j, w in enumerate(FINALS):
         for i, m in enumerate(("val_ce", "paloma")):
             ax = axes[i, j]

@@ -7,6 +7,8 @@ step count, GPU count and, for decay branches, the checkpoint it starts from). R
     w{width}_s1_bs{B}_lr{lr}_wd{wd}_d1x        its decay branch evaluated at 1x Chinchilla
     w{width}_s2_bs{B}_lr{lr}_wd{wd}            stage 2 main run: 16 passes over the pool, decays over the last 10%
     w{width}_s2_bs{B}_lr{lr}_wd{wd}_p{k}       its decay branch evaluated after pass k
+    w{width}_u_bs{B}_lr{lr}_wd{wd}[_d1x|_d2x]  ladder data_constrainedv2 (stage 3, configs in experiments/data_constrainedv2/):
+                                                unique data to 4x Chinchilla counting body + head, decay branches at 1x and 2x
     ..._seed{n}                                 another seed (model init)
 
 Model: Qwen3 dense block (pre-norm RMSNorm, per-head QK-norm, SwiGLU 4x width, RoPE 1e6, no biases), head size 128,
@@ -28,6 +30,8 @@ Examples (one call per sweep step; re-running is idempotent):
     python3 setup/make_dataconstrained_configs.py --width 512 --stage 2 --final --lr 3e-3 --bs 16 --wd 0.3 --seed 0 1
     python3 setup/make_dataconstrained_configs.py --width 512 --stage 2 --lr 6e-3 --bs 64 --wd 0.3 --seed 0 1 \
         --extend 32 --extend-evals 20 24 28      # w512_s2final_..._x32[_pK]: continue the final runs to 32 passes
+    python3 setup/make_dataconstrained_configs.py --width 768 --stage 2 --final --passes 32 --lr 3e-3 --bs 64 --wd 0.3 \
+        --seed 0 1                               # w768_s2final_..._x32[_pK]: 32 passes from scratch
 """
 
 import argparse
@@ -44,11 +48,13 @@ TOKENIZER = f"{ASSETS}/models/Qwen3-0.6B-Base-tokenizer"
 STREAM = f"{ASSETS}/data/dclm_qwen3_tokens"
 HELDOUT = f"{ASSETS}/data/dclm_qwen3_tokens/dclm_heldout"
 GROUP = "qwen3_ladder_dataconstrained"
+GROUP_V2 = "data_constrainedv2"  # stage 3: unique sweep with Chinchilla = 20 x (body + head)
+PROJECT = {GROUP: "lingua-clean-dataconstrained", GROUP_V2: "lingua-clean-data_constrainedv2"}
 SEQ, VOCAB, HEAD = 4096, 151_936, 128
 SWEEP_PASSES = [1, 2, 3, 4, 6, 8, 12]  # stage 2 branches during the sweep; the main run evaluates at 16
 N_PASSES = 16
-SEQS_PER_GPU = {512: 16, 1152: 8}
-EVAL_GPUS = {512: 1, 1152: 4}
+SEQS_PER_GPU = {512: 16, 768: 16, 1152: 8}
+EVAL_GPUS = {512: 1, 768: 2, 1152: 4}
 PALOMA = [
     "paloma_4chan_meta_sep::paloma", "paloma_c4_100_domains::paloma", "paloma_c4_en::paloma",
     "paloma_dolma_100_programing_languages::paloma", "paloma_dolma_100_subreddits::paloma",
@@ -73,6 +79,41 @@ def chinchilla(width):
     return 20 * shape(width)["body"]
 
 
+def chinchilla_bh(width):
+    """Chinchilla counting body + output head params (everything except the input embedding lookup)."""
+    s = shape(width)
+    return 20 * (s["body"] + s["embedding"])
+
+
+STREAM_32M = f"{ASSETS}/data/dclm_qwen3_tokens_32m"  # dclm_8m_0..3 (~40B tokens), same order as STREAM for 0 and 1
+UNIQUE_MULTS = {"d1x": 1, "d2x": 2}  # decay branches of the 4x main run
+
+
+def unique_runs(width, lr, bs, wd, seed):
+    """Unique-data sweep (Chinchilla = 20 x (body + head)): main run to 4x, decay branches at 1x and 2x. Warmup is
+    1 token per body + head param. Uses the 20B-token stream when 4x fits, else the 32M-doc stream."""
+    tps = bs * SEQ
+    C = chinchilla_bh(width)
+    s = shape(width)
+    base = f"w{width}_u_bs{bs}_lr{lr_fmt(lr)}_wd{fmt(wd)}" + (f"_seed{seed}" if seed else "")
+    main_dir = "${oc.env:MIDTRAIN_ROOT}/experiments/" + GROUP_V2 + "/" + base
+    main_steps = round(4 * C / tps)
+    stream = STREAM if main_steps * tps <= 20_000_000_000 else STREAM_32M
+    branches = {tag: round(m * C / tps) for tag, m in UNIQUE_MULTS.items()}
+    kw = dict(warmup_params=s["body"] + s["embedding"], stream=stream, group=GROUP_V2)
+    out = []
+    cfg, entry = config(width, base, main_steps, lr, bs, wd, seed, "unique", main_steps * tps,
+                        extra_saves={decay_start(e) for e in branches.values()}, **kw)
+    entry.update(stage=3, eval_point="4x", main=base)
+    out.append((base, cfg, entry))
+    for tag, e in branches.items():
+        cfg, entry = config(width, f"{base}_{tag}", e, lr, bs, wd, seed, "unique", main_steps * tps,
+                            branch_from=f"{main_dir}/checkpoints/{decay_start(e):010d}", **kw)
+        entry.update(stage=3, eval_point=tag, main=base)
+        out.append((f"{base}_{tag}", cfg, entry))
+    return out
+
+
 def pool_tokens(width):
     """0.25x Chinchilla, rounded down to a whole number of sequences divisible by 256."""
     seqs = chinchilla(width) // 4 // SEQ
@@ -94,15 +135,16 @@ def decay_start(steps):
     return steps - round(steps * 0.1)
 
 
-def config(width, name, steps, lr, bs, wd, seed, mode, n_tokens, branch_from=None, extra_saves=()):
+def config(width, name, steps, lr, bs, wd, seed, mode, n_tokens, branch_from=None, extra_saves=(), warmup_params=None,
+           stream=STREAM, group=GROUP):
     s = shape(width)
     gpus = max(1, bs // SEQS_PER_GPU[width])
     tps = bs * SEQ
-    warmup = round(s["body"] / tps)
+    warmup = round((warmup_params or s["body"]) / tps)
     dump_every = max(100, round(steps / 20))  # resumption checkpoints (preemptible QoS)
     cfg = {
-        "name": f"{GROUP}-{name}".replace("_", "-"),
-        "dump_dir": "${oc.env:MIDTRAIN_ROOT}/experiments/" + GROUP + "/" + name,
+        "name": f"{group}-{name}".replace("_", "-"),
+        "dump_dir": "${oc.env:MIDTRAIN_ROOT}/experiments/" + group + "/" + name,
         "steps": steps,
         "probe_freq": None,
         "seed": 777 + seed,
@@ -123,10 +165,10 @@ def config(width, name, steps, lr, bs, wd, seed, mode, n_tokens, branch_from=Non
         "data": {"root_dir": f"{ASSETS}/data", "sources": {}, "seed": 42, "batch_size": bs // gpus, "seq_len": SEQ,
                  "n_views": 2, "add_bos": False, "add_eos": True, "disable_cross_doc_attn": True,
                  "tokenizer": {"name": "hf", "path": TOKENIZER},
-                 "token_stream_dir": STREAM, "token_stream_mode": mode, "token_stream_tokens": n_tokens,
+                 "token_stream_dir": stream, "token_stream_mode": mode, "token_stream_tokens": n_tokens,
                  "token_stream_seed": 0},
         "profiling": {"run": False},
-        "logging": {"freq": 10, "wandb": {"project": "lingua-clean-dataconstrained",
+        "logging": {"freq": 10, "wandb": {"project": PROJECT[group],
                                           "entity": "${oc.env:WANDB_ENTITY,null}", "resume": "allow"}},
         "async_eval_gpus": EVAL_GPUS[width],
         "eval_backend": "olmes",
@@ -148,10 +190,15 @@ def config(width, name, steps, lr, bs, wd, seed, mode, n_tokens, branch_from=Non
     return cfg, entry
 
 
-def runs_for(width, stage, lr, bs, wd, seed, final=False):
-    """(name, config, manifest entry) for one configuration: the main run and its decay branches."""
+def runs_for(width, stage, lr, bs, wd, seed, final=False, n_passes=N_PASSES):
+    """(name, config, manifest entry) for one configuration: the main run and its decay branches. A --final run with
+    n_passes > 16 is named ..._x{n_passes} (like the extensions of the 16-pass finals) and branches after every pass
+    up to 16, then every 4 passes."""
     tps = bs * SEQ
     base = f"w{width}_s{stage}{'final' if final else ''}_bs{bs}_lr{lr_fmt(lr)}_wd{fmt(wd)}" + (f"_seed{seed}" if seed else "")
+    if n_passes != N_PASSES:
+        assert stage == 2 and final, "only stage 2 final runs change the pass count"
+        base += f"_x{n_passes}"
     main_dir = "${oc.env:MIDTRAIN_ROOT}/experiments/" + GROUP + "/" + base
     if stage == 1:
         C = chinchilla(width)
@@ -160,13 +207,15 @@ def runs_for(width, stage, lr, bs, wd, seed, final=False):
     else:
         assert pool_tokens(width) % tps == 0, (width, bs)
         per_pass = pool_tokens(width) // tps
-        main_steps, mode, n_tokens = N_PASSES * per_pass, "repeat", pool_tokens(width)
-        passes = range(1, N_PASSES) if final else SWEEP_PASSES
+        main_steps, mode, n_tokens = n_passes * per_pass, "repeat", pool_tokens(width)
+        passes = SWEEP_PASSES
+        if final:
+            passes = [k for k in range(1, n_passes) if k <= N_PASSES or k % 4 == 0]
         branches = {f"p{k}": k * per_pass for k in passes}
     out = []
     starts = {decay_start(e) for e in branches.values()}
     cfg, entry = config(width, base, main_steps, lr, bs, wd, seed, mode, n_tokens, extra_saves=starts)
-    entry.update(stage=stage, eval_point="2x" if stage == 1 else f"p{N_PASSES}", main=base)
+    entry.update(stage=stage, eval_point="2x" if stage == 1 else f"p{n_passes}", main=base)
     out.append((base, cfg, entry))
     for tag, e in branches.items():
         src = f"{main_dir}/checkpoints/{decay_start(e):010d}"
@@ -207,18 +256,21 @@ def extension_runs(width, lr, bs, wd, seed, n_passes, eval_passes):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--width", type=int, required=True, choices=[512, 1152])
-    ap.add_argument("--stage", type=int, required=True, choices=[1, 2])
+    ap.add_argument("--width", type=int, required=True, choices=[512, 768, 1152])
+    ap.add_argument("--stage", type=int, required=True, choices=[1, 2, 3],
+                    help="3 = unique sweep, Chinchilla incl. head (ladder data_constrainedv2, own config dir + manifest)")
     ap.add_argument("--lr", type=float, nargs="+", required=True)
     ap.add_argument("--bs", type=int, nargs="+", required=True)
     ap.add_argument("--wd", type=float, nargs="+", required=True)
     ap.add_argument("--seed", type=int, nargs="+", default=[0])
     ap.add_argument("--final", action="store_true", help="stage 2 final run: a decay branch after every pass")
+    ap.add_argument("--passes", type=int, default=N_PASSES, help="stage 2 --final run length in passes")
     ap.add_argument("--extend", type=int, help="extend the --final run(s) to this many passes (from 13.5 passes)")
     ap.add_argument("--extend-evals", type=int, nargs="*", default=[], help="decay branches of the extension")
     a = ap.parse_args()
-    os.makedirs(OUT, exist_ok=True)
-    man_path = f"{OUT}/manifest.json"
+    out_dir = os.path.join(ROOT, "apps/main/configs/experiments", GROUP_V2) if a.stage == 3 else OUT
+    os.makedirs(out_dir, exist_ok=True)
+    man_path = f"{out_dir}/manifest.json"
     manifest = json.load(open(man_path)) if os.path.exists(man_path) else {}
     new = 0
     for lr in a.lr:
@@ -226,9 +278,10 @@ def main():
             for wd in a.wd:
                 for seed in a.seed:
                     todo = (extension_runs(a.width, lr, bs, wd, seed, a.extend, a.extend_evals) if a.extend
-                            else runs_for(a.width, a.stage, lr, bs, wd, seed, a.final))
+                            else unique_runs(a.width, lr, bs, wd, seed) if a.stage == 3
+                            else runs_for(a.width, a.stage, lr, bs, wd, seed, a.final, a.passes))
                     for name, cfg, entry in todo:
-                        with open(f"{OUT}/{name}.yaml", "w") as f:
+                        with open(f"{out_dir}/{name}.yaml", "w") as f:
                             f.write(f"# Generated by setup/make_dataconstrained_configs.py ({entry['eval_point']}, "
                                     f"{entry['steps']} steps, {entry['gpus']} GPU(s)).\n")
                             yaml.safe_dump(cfg, f, sort_keys=False, width=120)
