@@ -24,6 +24,7 @@ from lingua.transformer import (
     TiedLinear,
     cross_entropy,
 )
+from lingua.linear_ce import linear_cross_entropy
 import pdb
 
 # Try to import flash attention for varlen support
@@ -119,6 +120,16 @@ def causal_mask(b, h, q_idx, kv_idx):
     return q_idx >= kv_idx
 
 
+class OutputHead(nn.Linear):
+    """The (untied) LM head. Given targets it returns the mean cross-entropy computed by linear_cross_entropy, which
+    keeps the head's GEMM and the loss inside this module so FSDP gathers / reduces its weight as usual."""
+
+    def forward(self, x: torch.Tensor, target: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if target is None:
+            return super().forward(x)
+        return linear_cross_entropy(x, self.weight, target)
+
+
 @dataclass
 class LMTransformerArgs(BaseTransformerArgs):
 
@@ -145,7 +156,7 @@ class LMTransformer(BaseTransformer):
         if args.weight_tying:
             self.output = TiedLinear(self.tok_embeddings)
         else:
-            self.output = nn.Linear(
+            self.output = OutputHead(
                 args.dim,
                 args.vocab_size,
                 bias=False,
@@ -167,13 +178,18 @@ class LMTransformer(BaseTransformer):
         attn_impl: str = "sdpa",
         cu_seqlens: Optional[torch.Tensor] = None,  # For FA2 varlen cross-doc masking
         max_seqlen: Optional[int] = None,  # For FA2 varlen
+        fused_ce: bool = False,  # with a target: LM head + loss via linear_cross_entropy (no fp32 logits)
+        fa4_attn: bool = False,  # with cu_seqlens: FlashAttention 4 kernels (lingua/fa4_attention.py, fa4_available())
     ):
         bsz, seqlen = token_values.shape
 
         h = self.tok_embeddings(token_values)
 
-        # Use FA2 varlen if cu_seqlens is provided — masking is handled internally
-        if cu_seqlens is not None and HAS_FLASH_ATTN:
+        # Use FA4 (if requested) or FA2 varlen if cu_seqlens is provided — masking is handled internally
+        if cu_seqlens is not None and fa4_attn:
+            attn_impl = "fa4_varlen"
+            mask = None
+        elif cu_seqlens is not None and HAS_FLASH_ATTN:
             attn_impl = "fa2_varlen"
             mask = None
         else:
@@ -186,6 +202,8 @@ class LMTransformer(BaseTransformer):
         h = super().forward(h, tok_idx=tok_idx, mask=mask, attn_impl=attn_impl,
                            cu_seqlens=cu_seqlens, max_seqlen=max_seqlen)
 
+        if target is not None and fused_ce and not self.weight_tying:
+            return self.output(self.norm(h), target)
         logits = self.output(self.norm(h))
         if target is not None:
             return cross_entropy(logits, target)
@@ -234,7 +252,8 @@ def build_fsdp_grouping_plan(model_args: LMTransformerArgs):
     for i in range(model_args.n_layers):
         group_plan.append((f"layers.{i}", False))
 
-    group_plan.append(("output", True))
+    # Keep the gathered head until backward instead of all-gathering it again (memory is plentiful at these sizes).
+    group_plan.append(("output", False))
 
     return group_plan
 

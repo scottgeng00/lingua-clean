@@ -35,7 +35,8 @@ from lingua.data import (
     build_dataloader_from_args,
     init_dataloader_state_from_args,
 )
-from lingua.token_stream import TokenStream, init_token_stream_state, token_stream_batches
+from lingua.token_stream import PinnedPrefetcher, TokenStream, init_token_stream_state, token_stream_batches
+from lingua.fa4_attention import fa4_available
 from lingua.online_data import (
     ExcessLossController,
     OnlineReweightingArgs,
@@ -2017,6 +2018,45 @@ def set_preemption_flag(signum, frame):
     preemption_flag["flag"] = True
 
 
+class NonFiniteGuard:
+    """Host-side bookkeeping of the non-finite-grad guard, fed one step late so the host never waits for the GPU.
+
+    push() queues a copy of the step's (found_inf, grad_norm) to pinned memory; check(keep) reads all but the newest
+    `keep` entries, logs every skipped step and raises after `max_consecutive` consecutive ones."""
+
+    def __init__(self, max_consecutive: int):
+        self.max_consecutive = max_consecutive
+        self.consecutive = 0
+        self.pending = []
+
+    def push(self, step: int, found_inf: torch.Tensor, grad_norm: torch.Tensor):
+        vals = torch.stack([found_inf, grad_norm.float()])
+        host = torch.empty(vals.shape, dtype=torch.float32, pin_memory=True)
+        host.copy_(vals, non_blocking=True)
+        done = torch.cuda.Event()
+        done.record()
+        self.pending.append((step, host, done))
+
+    def check(self, keep: int = 0):
+        while len(self.pending) > keep:
+            step, host, done = self.pending.pop(0)
+            done.synchronize()
+            if host[0].item() != 1.0:
+                self.consecutive = 0
+                continue
+            self.consecutive += 1
+            if get_is_master():
+                logger.warning(
+                    f"[NaN-guard] step={step}: non-finite grad_norm ({host[1].item()}); skipped optimizer.step(). "
+                    f"consecutive_skipped={self.consecutive}"
+                )
+            if self.consecutive >= self.max_consecutive:
+                raise RuntimeError(
+                    f"[NaN-guard] {self.consecutive} consecutive non-finite-grad steps at step {step}; aborting "
+                    f"to avoid silently burning compute. Override threshold with LINGUA_MAX_CONSECUTIVE_NAN_SKIPS=<N>."
+                )
+
+
 def every_n_steps(train_state, freq, acc_step=None, acc_freq=None):
     test = train_state.step % freq == 0
     if acc_step is not None:
@@ -2340,6 +2380,13 @@ def train(args: TrainArgs):
 
         logger.info(f"Model size: {model_param_count:,} total parameters")
 
+        # Document-masked attention (data.disable_cross_doc_attn): FlashAttention 4 if available, else flash-attn 2
+        head_dim = args.model.head_dim or args.model.dim // args.model.n_heads
+        use_fa4_attn = (args.distributed.fa4_varlen_attn and getattr(args.data, 'disable_cross_doc_attn', False)
+                        and head_dim % 8 == 0 and head_dim <= 128 and fa4_available())
+        if use_fa4_attn:
+            logger.info("Document-masked attention: FlashAttention 4")
+
         gpu_memory_monitor = GPUMemoryMonitor("cuda")
         logger.info(
             f"GPU capacity: {gpu_memory_monitor.device_name} ({gpu_memory_monitor.device_index}) "
@@ -2657,8 +2704,9 @@ def train(args: TrainArgs):
                 stream = TokenStream(args.data.token_stream_dir, args.data.token_stream_mode,
                                      args.data.token_stream_tokens, args.data.seq_len, args.data.token_stream_seed)
                 logger.info(f"Token stream resumes at global sequence {train_state.data_loader_state['next_seq']:,}")
-                data_loader = token_stream_batches(stream, args.data.batch_size, dp_rank, dp_degree,
-                                                   train_state.data_loader_state)
+                data_loader = PinnedPrefetcher(token_stream_batches(stream, args.data.batch_size, dp_rank, dp_degree,
+                                                                    train_state.data_loader_state))
+                context_stack.callback(data_loader.close)
             else:
                 data_loader = context_stack.enter_context(
                     build_dataloader_from_args(
@@ -2697,6 +2745,11 @@ def train(args: TrainArgs):
 
         # attn_impl = "flex_attention" if args.data.mask_cross_doc_loss else "sdpa"
         # logger.info(f"Attn implementation: {attn_impl}")
+        nonfinite_guard = NonFiniteGuard(int(os.environ.get("LINGUA_MAX_CONSECUTIVE_NAN_SKIPS", "10")))
+        assert optimizer.defaults.get("fused"), "the non-finite-grad guard relies on fused AdamW's found_inf"
+        # Objects alive now (model, optimizer, compiled code, ...) are never garbage; keep the periodic gc.collect()
+        # from rescanning them.
+        gc.freeze()
         while train_state.step < args.steps:
             # We constrain train_state.acc_step to be in range 0 to args.grad_acc_steps - 1
             train_state.acc_step = (train_state.acc_step + 1) % args.grad_acc_steps
@@ -2799,13 +2852,23 @@ def train(args: TrainArgs):
                 gc.collect()
 
             # Extract input_ids and labels (views 0 and 1)
-            input_ids = batch_tokens[:, :, 0].to(device="cuda", non_blocking=True)
-            labels = batch_tokens[:, :, 1].to(device="cuda", non_blocking=True)
+            if isinstance(batch, dict) and "inputs_pinned" in batch:
+                # Pinned by PinnedPrefetcher: truly asynchronous copies, no wait for the GPU to drain.
+                input_ids = batch["inputs_pinned"].to(device="cuda", non_blocking=True)
+                labels = batch["labels_pinned"].to(device="cuda", non_blocking=True)
+            else:
+                input_ids = batch_tokens[:, :, 0].to(device="cuda", non_blocking=True)
+                labels = batch_tokens[:, :, 1].to(device="cuda", non_blocking=True)
 
             # Prepare cu_seqlens for FA2 varlen if cross-doc attention masking is enabled
             cu_seqlens_tensor = None
             max_seqlen = None
-            if getattr(args.data, 'disable_cross_doc_attn', False) and batch_cu_seqlens is not None:
+            if (getattr(args.data, 'disable_cross_doc_attn', False) and batch_cu_seqlens is not None
+                    and "cu_seqlens_flat" in batch):
+                # Flattened (same values as the loop below) and pinned by PinnedPrefetcher.
+                cu_seqlens_tensor = batch["cu_seqlens_flat"].to(device="cuda", non_blocking=True)
+                max_seqlen = batch["max_seqlen"]
+            elif getattr(args.data, 'disable_cross_doc_attn', False) and batch_cu_seqlens is not None:
                 # Convert per-batch cu_seqlens to a single flattened tensor for FA2 varlen
                 # FA2 varlen expects cu_seqlens to mark document boundaries across the flattened batch
                 # For batch_size B and seq_len S, we have B*S total tokens
@@ -6986,8 +7049,12 @@ def train(args: TrainArgs):
             else:
                 # cu_seqlens is None unless data.disable_cross_doc_attn is set, in
                 # which case attention is restricted to each packed document.
+                if cu_seqlens_tensor is not None and use_fa4_attn:
+                    # one compiled graph for any number of documents per batch
+                    torch._dynamo.maybe_mark_dynamic(cu_seqlens_tensor, 0)
                 loss = model(input_ids, labels,
-                             cu_seqlens=cu_seqlens_tensor, max_seqlen=max_seqlen)
+                             cu_seqlens=cu_seqlens_tensor, max_seqlen=max_seqlen,
+                             fused_ce=args.distributed.fused_linear_ce, fa4_attn=use_fa4_attn)
             if args.grad_acc_steps > 1:
                 model.set_requires_gradient_sync(train_state.acc_step == 0)
 
@@ -7103,7 +7170,6 @@ def train(args: TrainArgs):
 
             # optimizer step
             grad_norm = -1.0
-            skipped_nonfinite_step = False
             if train_state.acc_step == 0:
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=args.optim.clip, foreach=True
@@ -7111,7 +7177,7 @@ def train(args: TrainArgs):
 
                 grad_norm = (
                     grad_norm.full_tensor() if isinstance(grad_norm, DTensor) else grad_norm
-                ).item()
+                )
 
                 # NaN/inf guard. A single bad batch (FP8 teacher overflow,
                 # transient NCCL bit-flip, etc.) can produce a non-finite grad
@@ -7128,47 +7194,21 @@ def train(args: TrainArgs):
                 # with the configured horizon. Threshold for "give up and
                 # raise" defaults to 10 consecutive skipped steps and can be
                 # overridden via LINGUA_MAX_CONSECUTIVE_NAN_SKIPS.
-                if not math.isfinite(grad_norm):
-                    skipped_nonfinite_step = True
-                    optimizer.zero_grad()
-                    scheduler.step()
-                    train_state.step += 1
-                    if not hasattr(train_state, "consecutive_nonfinite_steps"):
-                        train_state.consecutive_nonfinite_steps = 0
-                    train_state.consecutive_nonfinite_steps += 1
-                    if get_is_master():
-                        logger.warning(
-                            f"[NaN-guard] step={train_state.step}: "
-                            f"non-finite grad_norm ({grad_norm}); skipped "
-                            f"optimizer.step(). "
-                            f"consecutive_skipped={train_state.consecutive_nonfinite_steps}"
-                        )
-                    _max_consec = int(
-                        os.environ.get("LINGUA_MAX_CONSECUTIVE_NAN_SKIPS", "10")
-                    )
-                    if train_state.consecutive_nonfinite_steps >= _max_consec:
-                        raise RuntimeError(
-                            f"[NaN-guard] {train_state.consecutive_nonfinite_steps} "
-                            f"consecutive non-finite-grad steps at step "
-                            f"{train_state.step}; aborting to avoid silently "
-                            f"burning compute. Override threshold with "
-                            f"LINGUA_MAX_CONSECUTIVE_NAN_SKIPS=<N>."
-                        )
-                else:
-                    optimizer.step()
-                    scheduler.step()
-                    optimizer.zero_grad()
-                    train_state.step += 1
-                    if hasattr(train_state, "consecutive_nonfinite_steps"):
-                        train_state.consecutive_nonfinite_steps = 0
+                # The check runs on the GPU so it costs no host sync: given found_inf == 1 the fused AdamW kernel
+                # leaves params and moments untouched (and restores its step count). The host reads the flag one
+                # step later (nonfinite_guard), which also keeps the CPU at most about one step ahead of the GPU.
+                found_inf = (~torch.isfinite(grad_norm)).float()
+                optimizer.found_inf = found_inf
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+                train_state.step += 1
+                nonfinite_guard.push(train_state.step, found_inf, grad_norm)
+                nonfinite_guard.check(keep=1)
 
             # updates the scale for next iteration
             # training iteration complete
             end_timer.record()
-
-            torch.cuda.synchronize()
-
-            curr_iter_time = round(start_timer.elapsed_time(end_timer) * 1e-3, 4)
 
             # if profiler is active
             if torch_profiler:
@@ -7181,6 +7221,10 @@ def train(args: TrainArgs):
                 acc_step=None if args.logging.acc_freq else 0,
                 acc_freq=args.logging.acc_freq,
             ):
+                # The only host sync of a step, at logging steps; before reading the timer so wps stays exact.
+                end_timer.synchronize()
+                curr_iter_time = round(start_timer.elapsed_time(end_timer) * 1e-3, 4)
+                grad_norm = grad_norm.item() if torch.is_tensor(grad_norm) else grad_norm
                 time_delta = timer() - time_last_log
                 wps = nwords_since_last_log / (time_delta * args.distributed.tp_size)
 
@@ -7439,6 +7483,8 @@ def train(args: TrainArgs):
                     train_state,
                     args,
                     device_mesh=world_mesh,
+                    # evals read the checkpoint right away
+                    async_save=not is_eval_step,
                 )
 
                 if saved and online_ctrl is not None and get_is_master():
@@ -7478,6 +7524,8 @@ def train(args: TrainArgs):
                                     f"EMA-Frontier: could not load step {lagged_step}, "
                                     f"keeping previous reference"
                                 )
+            else:
+                checkpoint.maybe_finalize(train_state.step)
 
             if args.eval is not None and is_eval_step:
                 eval_backend = getattr(args, "eval_backend", "harness")
@@ -7552,6 +7600,7 @@ def train(args: TrainArgs):
                         )
 
             if preemption_flag["flag"]:
+                nonfinite_guard.check(keep=0)
                 if not saved:
                     checkpoint.save(
                         model,
@@ -7560,8 +7609,11 @@ def train(args: TrainArgs):
                         args,
                         device_mesh=world_mesh,
                     )
+                checkpoint.wait()
                 requeue_slurm_job()
                 sys.exit(0)
+
+        nonfinite_guard.check(keep=0)
 
     if not saved:
         checkpoint.save(
@@ -7571,6 +7623,7 @@ def train(args: TrainArgs):
             args,
             device_mesh=world_mesh,
         )
+    checkpoint.wait()
     gc.collect()
 
 

@@ -32,6 +32,9 @@ export SLURM_LOG_DIR="${SLURM_LOG_DIR:-${CACHE_DIR}/runs/slurm_logs}"
 # GB300 / aarch64 cluster: only .venv-kd (torch 2.8.0+cu129) runs here, for training and evals.
 export LINGUA_VENV="${LINGUA_VENV:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/.venv-kd}"
 export OLMES_CONDA_ENV="${OLMES_CONDA_ENV:-/home/sgeng/scottg/pretrain/olmes/.venv-lmeval}"  # OLMES ported to lm_eval 0.4.13 (branch lm-eval-0.4.13)
+# FlashAttention 4 and its dependencies, installed outside the venv (see lingua/fa4_attention.py; only the training
+# process adds this directory to its sys.path). Unset / not importable -> training uses flash-attn 2.
+export LINGUA_FA4_SITE="${LINGUA_FA4_SITE:-/checkpoint/mnm/sgeng/pretrain/speed-extras/site}"
 
 # SLURM. Leave a value empty to omit the flag and use the site default.
 export SLURM_ACCOUNT="${SLURM_ACCOUNT:-mnm}"

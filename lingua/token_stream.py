@@ -109,3 +109,72 @@ def token_stream_batches(stream: TokenStream, batch_size: int, rank: int, world_
 
 def init_token_stream_state() -> Dict[str, Any]:
     return {"token_stream": True, "next_seq": 0}
+
+
+class PinnedPrefetcher:
+    """Runs a token_stream_batches iterator `depth` batches ahead in a background thread.
+
+    Each batch dict gains pinned CPU tensors 'inputs_pinned' / 'labels_pinned' [b, L] (int64), 'cu_seqlens_flat'
+    (int32 document boundaries over the flattened b * L tokens, as flash-attn varlen expects) and 'max_seqlen', so the
+    training loop can copy them to the GPU with non_blocking=True instead of synchronizing with it every step.
+    Batches and states come out in exactly the order of the wrapped iterator."""
+
+    def __init__(self, it: Iterator[Tuple[Dict[str, Any], Dict[str, Any]]], depth: int = 2):
+        import queue
+        import threading
+        import torch
+
+        self._torch = torch
+        self._it = it
+        self._q = queue.Queue(maxsize=depth)
+        self._stop = threading.Event()
+        self._device = torch.cuda.current_device() if torch.cuda.is_available() else None
+        self._thread = threading.Thread(target=self._run, name="token-stream-prefetch", daemon=True)
+        self._thread.start()
+
+    def _prepare(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        torch = self._torch
+        toks = batch["tokens"]
+        L = toks.shape[1]
+        flat, max_len = [0], 0
+        for b, cu in enumerate(batch["cu_seqlens"]):
+            for i in range(1, len(cu)):
+                flat.append(b * L + cu[i])
+                max_len = max(max_len, cu[i] - cu[i - 1])
+        batch["inputs_pinned"] = torch.from_numpy(np.ascontiguousarray(toks[:, :, 0], dtype=np.int64)).pin_memory()
+        batch["labels_pinned"] = torch.from_numpy(np.ascontiguousarray(toks[:, :, 1], dtype=np.int64)).pin_memory()
+        batch["cu_seqlens_flat"] = torch.tensor(flat, dtype=torch.int32).pin_memory()
+        batch["max_seqlen"] = int(max_len)
+        return batch
+
+    def _put(self, item) -> bool:
+        import queue
+        while not self._stop.is_set():
+            try:
+                self._q.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def _run(self):
+        if self._device is not None:
+            self._torch.cuda.set_device(self._device)
+        try:
+            for batch, state in self._it:
+                if not self._put((self._prepare(batch), state)):
+                    return
+        except BaseException as e:  # surfaced to the training loop when it asks for this batch
+            self._put(e)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        item = self._q.get()
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    def close(self):
+        self._stop.set()

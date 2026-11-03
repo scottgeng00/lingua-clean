@@ -15,6 +15,7 @@ from torch.nn.attention.flex_attention import (
 )
 
 from lingua import probe
+from lingua.fa4_attention import fa4_varlen_causal_attention
 import pdb
 
 # Try to import flash attention for varlen support
@@ -410,7 +411,7 @@ class Attention(nn.Module):
         tok_idx: Optional[torch.Tensor] = None,
         mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
         attn_impl: str = "sdpa",
-        cu_seqlens: Optional[torch.Tensor] = None,  # For FA2 varlen: cumulative sequence lengths
+        cu_seqlens: Optional[torch.Tensor] = None,  # For FA2 / FA4 varlen: cumulative sequence lengths
         max_seqlen: Optional[int] = None,  # For FA2 varlen: max sequence length in batch
     ) -> torch.Tensor:
         # B S D
@@ -443,7 +444,17 @@ class Attention(nn.Module):
         xk = repeat_kv(xk, self.heads_per_group, dim=2)
         xv = repeat_kv(xv, self.heads_per_group, dim=2)
 
-        if attn_impl == "fa2_varlen" and HAS_FLASH_ATTN and cu_seqlens is not None:
+        if attn_impl == "fa4_varlen":
+            # Same semantics as the fa2_varlen branch below, FlashAttention 4 kernels (lingua/fa4_attention.py)
+            total_tokens = bsz * seq_len
+            output = fa4_varlen_causal_attention(
+                xq.reshape(total_tokens, self.n_heads, self.head_dim),
+                xk.reshape(total_tokens, self.n_heads, self.head_dim),
+                xv.reshape(total_tokens, self.n_heads, self.head_dim),
+                cu_seqlens,
+            ).view(bsz, seq_len, self.n_heads, self.head_dim)
+
+        elif attn_impl == "fa2_varlen" and HAS_FLASH_ATTN and cu_seqlens is not None:
             # Flash Attention 2 variable-length attention for cross-document masking
             # This is highly efficient and prevents attention across document boundaries
 

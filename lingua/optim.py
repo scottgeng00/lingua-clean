@@ -8,6 +8,8 @@ import logging
 from torch import nn
 from torch.optim import AdamW, lr_scheduler
 
+from lingua.fast_adamw import FastAdamW
+
 logger = logging.getLogger()
 
 
@@ -30,6 +32,9 @@ class OptimArgs:
     # Weight decay only on 2D matrices except the (tied) token embedding; none on norm gains
     # (RMSNorm / QK-norm) or the embedding / LM head. Off by default (decay everything).
     decay_matrices_only: bool = False
+    # AdamW update as one Triton kernel in fp32 (lingua/fast_adamw.py) instead of torch's fused kernel, whose fp64
+    # arithmetic is slow on GPUs with little fp64 throughput (GB300). Same state layout either way.
+    triton_adamw: bool = True
 
     exp_factor: float = 0.5
 
@@ -177,7 +182,7 @@ def build_optimizer(model: nn.Module, args: OptimArgs, n_steps: int):
                     f"({sum(p.numel() for p in no_decay):,} params: norms, embedding / LM head)")
     else:
         params = model.parameters()
-    optimizer = AdamW(
+    optimizer = (FastAdamW if args.triton_adamw else AdamW)(
         params,
         lr=args.lr,
         betas=(args.beta1, args.beta2),

@@ -1,23 +1,23 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
-import atexit
 import contextlib
 from itertools import chain
 import logging
 import multiprocessing as mp
 import os
 import random
-import shutil
 import signal
 import socket
 import subprocess
 import sys
+import getpass
 import tempfile
 from dataclasses import asdict, dataclass
 from functools import lru_cache, partial, reduce
 from typing import List, Optional, Tuple, Union
 
 import torch
+import torch._inductor.config
 from torch.distributed import ReduceOp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch import distributed as dist
@@ -73,6 +73,16 @@ class DistributedArgs:
     detect_anomaly: bool = False
 
     compile_cache_size_limit: int = 8
+
+    # Pretraining loss: LM head + cross-entropy via lingua.linear_ce (same precision, fewer passes over the logits).
+    fused_linear_ce: bool = True
+    # Document-masked attention via FlashAttention 4 (lingua.fa4_attention) when it is importable, else flash-attn 2.
+    # ~2.3x faster attention than flash-attn 2 on GB300.
+    fa4_varlen_attn: bool = True
+    # torch.compile: benchmark block sizes for every generated kernel (the default heuristics leave the norm / RoPE
+    # backward reductions well below memory bandwidth on GB300). +1.6% (w512) / +2.4% (w768) tokens/s; compile takes
+    # 5-15 s longer when the node's compile caches are cold.
+    coordinate_descent_tuning: bool = True
 
     spawn_method: str = "forkserver"
 
@@ -215,12 +225,13 @@ def setup_env(env_args):
 
     # When using Triton, it attempts to locate prebuilt kernels in a cache
     # located at ~/.triton/cache, but when that's backed by NFS this can fail
-    # with a "OSError: [Errno 116] Stale file handle" error. If we were to set
-    # it to a local directory it would belong to the first user who created it
-    # and it would fail for the job of any other successive user assigned to
-    # that machine. To avoid all this mess we use a temporary per-process cache.
-    triton_cache_dir = tempfile.mkdtemp()
-    atexit.register(shutil.rmtree, triton_cache_dir, ignore_errors=True)
+    # with a "OSError: [Errno 116] Stale file handle" error. Use a node-local
+    # directory per user instead (next to torch.compile's default cache), so the
+    # compiled kernels persist across jobs on the node without clashing with
+    # other users' jobs. Triton writes cache entries atomically, so concurrent
+    # ranks / jobs can share it.
+    triton_cache_dir = os.path.join(tempfile.gettempdir(), f"torchinductor_{getpass.getuser()}", "triton")
+    os.makedirs(triton_cache_dir, exist_ok=True)
     env_vars["TRITON_CACHE_DIR"] = triton_cache_dir
 
     # We change the tmp dir to a node-local scratch path in case it's a slurm job
@@ -250,9 +261,10 @@ def setup_torch_distributed(dist_args):
         - global_rank
         - world_size
     """
+    # No warm-up (`with mp.Manager(): pass`): with forkserver that starts a server process which re-imports the main
+    # module (~10 s). The server starts on first use instead (the async data loader's producer process); the token
+    # stream loader never needs it.
     mp.set_start_method(dist_args.spawn_method)
-    with mp.Manager():
-        pass
 
     local_rank = get_local_rank()
 
@@ -486,7 +498,8 @@ def parallelize_model(
                 ),
             )
 
-        model = fully_shard(model, **fsdp_config, reshard_after_forward=True)
+        # The root only holds the leftover small parameters (final norm): no point resharding them between fwd and bwd.
+        model = fully_shard(model, **fsdp_config, reshard_after_forward=False)
     else:
         raise ValueError(f"Invalid fsdp_type: {distributed_args.fsdp_type}")
 
@@ -503,6 +516,7 @@ def parallelize_model(
         torch._dynamo.config.cache_size_limit = (
             distributed_args.compile_cache_size_limit
         )
+        torch._inductor.config.coordinate_descent_tuning = distributed_args.coordinate_descent_tuning
         model.compile()
 
     return model

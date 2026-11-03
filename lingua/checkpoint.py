@@ -68,6 +68,12 @@ class CheckpointArgs:
     # Decay branch: a checkpoint folder of another run (.../checkpoints/<step>). While this run has no checkpoint of
     # its own it starts from that one, with full state (model, optimizer, step, scheduler, data position).
     branch_from: Optional[str] = None
+    # Periodic (dump) saves copy the state to CPU memory and write it from a background thread while training goes
+    # on; the checkpoint is completed (train state json written, old checkpoints rotated out) finalize_after steps
+    # later. A folder without its train state json is never resumed from. Final / eval / preemption saves stay
+    # synchronous.
+    async_save: bool = True
+    finalize_after: int = 50
 
 
 def _get_key_step(name: str):
@@ -132,6 +138,11 @@ class CheckpointManager:
         self.continue_training_from_init = args.continue_training_from_init
         self.extra_save_steps = set(args.extra_save_steps or [])
         self.branch_from = args.branch_from
+        self.async_save = args.async_save
+        self.finalize_after = args.finalize_after
+        self._pending = None  # (future, finalize, step) of an asynchronous save
+        self._async_group = None  # gloo group: DCP's planning collectives run in the writer thread
+        self._async_writer = None  # keeps its pinned CPU copy of the state across saves (faster staging)
 
         assert os.path.exists(self.path), f"Path {self.path} does not exist and needs to be created before using CheckpointManager (use instantiate_and_make_dir)"
 
@@ -231,6 +242,20 @@ class CheckpointManager:
         model_sd, optim_sd = get_state_dict(model, optimizer)
         return {"model": model_sd, "optim": optim_sd}
 
+    def wait(self):
+        """Complete a pending asynchronous save (blocks until its writes are done). Collective."""
+        if self._pending is None:
+            return
+        future, finalize, _ = self._pending
+        self._pending = None
+        future.result()
+        finalize()
+
+    def maybe_finalize(self, step: int):
+        """Call every step on all ranks: completes a pending asynchronous save finalize_after steps after it began."""
+        if self._pending is not None and step >= self._pending[2] + self.finalize_after:
+            self.wait()
+
     def save(
         self,
         model,
@@ -238,7 +263,9 @@ class CheckpointManager:
         train_state,
         config,
         device_mesh: Optional[DeviceMesh] = None,
+        async_save: bool = False,
     ) -> bool:
+        self.wait()
 
         # When creating directory check if only rank0 or is there other solution
         path = Path(self.path)
@@ -250,36 +277,50 @@ class CheckpointManager:
 
         logger.info("Saving...")
         state_dict = self.get_state_dict(model, optimizer)
-        dcp.save(state_dict, checkpoint_id=curr_save_dir)
-        logger.info("State dict saved!")
-
-        if dist.is_initialized():
-            dist.barrier()
-
-        if get_is_master():
-            with open(curr_save_dir / CONFIG_NAME, "w") as f:
-                json.dump(
-                    OmegaConf.to_container(OmegaConf.structured(config), resolve=True),
-                    f,
-                )
-
-        # Add json dump here
+        # Snapshot now: with an asynchronous save, finalize() runs after training has moved on.
+        train_state_json = json.dumps(train_state.state_dict())
         dp_rank, tp_rank = self._get_dp_tp_mesh(device_mesh)
-        if tp_rank == 0:
-            train_state_name = TRAIN_STATE_NAME.format(dp_rank)
-            logger.info(
-                f"Saving train state to: {str(curr_save_dir / train_state_name)}"
-            )
-            with open(curr_save_dir / train_state_name, "w") as f:
-                json.dump(train_state.state_dict(), f)
-            logger.info("Train state saved !")
 
-        self.existing_saves.append(curr_save_dir)
+        def finalize():
+            if dist.is_initialized():
+                dist.barrier()
 
-        self.clean_up()
+            if get_is_master():
+                with open(curr_save_dir / CONFIG_NAME, "w") as f:
+                    json.dump(
+                        OmegaConf.to_container(OmegaConf.structured(config), resolve=True),
+                        f,
+                    )
 
-        if dist.is_initialized():
-            dist.barrier()
+            # Add json dump here
+            if tp_rank == 0:
+                train_state_name = TRAIN_STATE_NAME.format(dp_rank)
+                logger.info(
+                    f"Saving train state to: {str(curr_save_dir / train_state_name)}"
+                )
+                with open(curr_save_dir / train_state_name, "w") as f:
+                    f.write(train_state_json)
+                logger.info("Train state saved !")
+
+            self.existing_saves.append(curr_save_dir)
+
+            self.clean_up()
+
+            if dist.is_initialized():
+                dist.barrier()
+
+        if async_save and self.async_save and dist.is_initialized():
+            if self._async_group is None:
+                self._async_group = dist.new_group(backend="gloo")
+                self._async_writer = dcp.FileSystemWriter(curr_save_dir, cache_staged_state_dict=True)
+            future = dcp.async_save(state_dict, checkpoint_id=curr_save_dir, storage_writer=self._async_writer,
+                                    process_group=self._async_group)
+            self._pending = (future, finalize, train_state.step)
+            logger.info("State dict staged in CPU memory, writing in the background")
+        else:
+            dcp.save(state_dict, checkpoint_id=curr_save_dir)
+            logger.info("State dict saved!")
+            finalize()
         return True
 
     @torch.no_grad()
