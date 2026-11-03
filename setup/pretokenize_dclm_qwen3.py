@@ -13,6 +13,8 @@ Used by the data-constrained ladder (lingua/token_stream.py): stage 1 reads a pr
 repeats a prefix (the pool).
 
     .venv-kd/bin/python -m setup.pretokenize_dclm_qwen3
+    .venv-kd/bin/python -m setup.pretokenize_dclm_qwen3 --subsets dclm_8m_{0..7} --out .../dclm_qwen3_tokens_64m \
+        --copy-from .../dclm_qwen3_tokens_32m      # tokenizes only dclm_8m_4..7
 """
 
 import argparse
@@ -92,17 +94,37 @@ def place_part(task):
     return subset, c, part
 
 
+def copy_block(task):
+    """Copy tokens [lo, hi) of src tokens.bin into the same positions of dst tokens.bin."""
+    src, dst, lo, hi = task
+    s = np.memmap(src, dtype=np.uint32, mode="r")
+    d = np.memmap(dst, dtype=np.uint32, mode="r+")
+    d[lo:hi] = s[lo:hi]
+    d.flush()
+    return hi - lo
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--subsets", nargs="+", default=["dclm_8m_0", "dclm_8m_1"])
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--workers", type=int, default=140)
+    ap.add_argument("--copy-from", help="existing output dir whose subsets are a prefix of --subsets: their tokens are "
+                                        "copied instead of re-tokenized")
     a = ap.parse_args()
     tmp = f"{a.out}/tmp"
     os.makedirs(tmp, exist_ok=True)
     rows = {s: json.load(open(f"{DATA}/{s}/dataset.json"))["rows"] for s in a.subsets}
+    copied = []
+    if a.copy_from:
+        src_meta = json.load(open(f"{a.copy_from}/meta.json"))
+        copied = list(src_meta["subsets"])
+        assert a.subsets[:len(copied)] == copied, f"{copied} is not a prefix of {a.subsets}"
+        for s in copied:
+            assert src_meta["subsets"][s]["docs"] == rows[s], s
+        src_offsets = np.load(f"{a.copy_from}/doc_offsets.npy")
 
-    tasks = [(s, c, p, tmp) for s in a.subsets for c in range(N_CHUNKS) for p in range(PARTS)]
+    tasks = [(s, c, p, tmp) for s in a.subsets if s not in copied for c in range(N_CHUNKS) for p in range(PARTS)]
     with Pool(a.workers) as pool:
         for k, (s, c, p, n) in enumerate(pool.imap_unordered(tokenize_part, tasks)):
             print(f"tokenized {k + 1}/{len(tasks)}: {s} chunk {c} part {p} ({n:,} docs)", flush=True)
@@ -110,6 +132,12 @@ def main():
     # Global per-document lengths: subset s row j = chunk j % 16, line j // 16 = part (line % PARTS).
     lengths, s_starts, start = [], {}, 0
     for s in a.subsets:
+        if s in copied:
+            L = np.diff(src_offsets[start:start + rows[s] + 1])
+            s_starts[s] = start
+            start += rows[s]
+            lengths.append(L)
+            continue
         L = np.zeros(rows[s], dtype=np.int64)
         for c in range(N_CHUNKS):
             for p in range(PARTS):
@@ -126,7 +154,15 @@ def main():
     np.memmap(f"{a.out}/tokens.bin", dtype=np.uint32, mode="w+", shape=(int(offsets[-1]),)).flush()
     print(f"{len(lengths):,} docs, {int(offsets[-1]):,} tokens; placing", flush=True)
 
-    place = [(s, s_starts[s], rows[s], c, p, tmp, a.out) for s in a.subsets for c in range(N_CHUNKS) for p in range(PARTS)]
+    if copied:
+        n_copy = int(src_offsets[sum(rows[s] for s in copied)])
+        blocks = [(f"{a.copy_from}/tokens.bin", f"{a.out}/tokens.bin", lo, min(lo + (1 << 28), n_copy))
+                  for lo in range(0, n_copy, 1 << 28)]
+        with Pool(min(a.workers, 32)) as pool:
+            done = sum(pool.map(copy_block, blocks))
+        print(f"copied {done:,} tokens of {copied} from {a.copy_from}", flush=True)
+    place = [(s, s_starts[s], rows[s], c, p, tmp, a.out) for s in a.subsets if s not in copied
+             for c in range(N_CHUNKS) for p in range(PARTS)]
     with Pool(min(a.workers, 64)) as pool:
         for k, _ in enumerate(pool.imap_unordered(place_part, place)):
             if k % 16 == 0:
@@ -135,7 +171,8 @@ def main():
     meta = {"tokenizer": TOKENIZER, "eos_id": 151643, "dtype": "uint32", "order": "subsets in order, rows in order",
             "subsets": {s: {"first_doc": s_starts[s], "docs": rows[s],
                             "tokens": int(offsets[s_starts[s] + rows[s]] - offsets[s_starts[s]])} for s in a.subsets},
-            "docs": len(lengths), "tokens": int(offsets[-1]), "script": "setup/pretokenize_dclm_qwen3.py"}
+            "docs": len(lengths), "tokens": int(offsets[-1]), "script": "setup/pretokenize_dclm_qwen3.py",
+            "copied_from": a.copy_from}
     json.dump(meta, open(f"{a.out}/meta.json", "w"), indent=1)
     for f in os.listdir(tmp):
         os.remove(f"{tmp}/{f}")

@@ -1,12 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 
 from collections import defaultdict
+import copy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import json
 import logging
 import math
 import os
+import time
 from pathlib import Path
 from lm_eval.api.instance import Instance
 from lm_eval.api.model import LM
@@ -81,8 +83,23 @@ class ValidationArgs:
     # exactly as in training; every token except each document's first is scored. Reports token-weighted
     # cross-entropy and bits per byte. (A list, not a dict: dataclass_from_dict makes dicts struct, so keys can't be
     # added.)
+    # A directory without tokens.bin whose subdirectories hold token streams (e.g. assets/data/paloma_qwen3, from
+    # setup/pretokenize_paloma_qwen3.py) expands to those subdirectories, reported as "<root>/<sub>", plus
+    # "<root>/mean" (unweighted mean of the subdirectories' bpb). A stream whose meta.json has "eval_mode": "rolling"
+    # is scored document by document with OLMES' rolling windows instead of being packed (see
+    # eval_on_token_streams).
     token_streams: List[str] = field(default_factory=list)
     token_stream_seq_len: int = 4096
+    # Tokens per forward pass for "rolling" streams (windows of <= rolling_max_len tokens are packed into it).
+    token_stream_rolling_batch_tokens: int = 32768
+    # Compute precision for "rolling" streams. OLMES' HF backend upcasts the bf16 export to fp32 and so does "fp32"
+    # (the lingua model's bf16 weights upcast, sdpa attention): matches OLMES to ~1e-6 bpb but ~7x slower than "bf16"
+    # (flash attention), which differs from OLMES by <~2e-4 bpb on most sources but by up to ~5e-3 on
+    # twitterAAE_HELM_fixed and ~6e-4 on gab (very short documents; bf16 error is largest at a doc's first
+    # positions). "mixed": windows shorter than token_stream_rolling_fp32_below input tokens in fp32, the rest in
+    # bf16 (fp32 for ~5% of Paloma's tokens, incl. all of twitterAAE and gab).
+    token_stream_rolling_dtype: str = "mixed"
+    token_stream_rolling_fp32_below: int = 128
 
 @dataclass
 class EvalArgs:
@@ -197,40 +214,201 @@ class EvalHarnessLM(LM):
         return results
 
 
+def expand_token_streams(paths: List[str]) -> List[Tuple[str, str, Optional[str]]]:
+    """[(path, report name, group)]: a path holding tokens.bin is reported under its basename; a directory without
+    tokens.bin expands to its subdirectories that hold one (sorted), reported as "<root>/<sub>" in group <root>."""
+    out = []
+    for path in paths:
+        path = os.path.normpath(path)
+        root = os.path.basename(path)
+        if os.path.exists(os.path.join(path, "tokens.bin")):
+            out.append((path, root, None))
+            continue
+        subs = sorted(d for d in os.listdir(path) if os.path.exists(os.path.join(path, d, "tokens.bin")))
+        assert subs, f"{path}: no tokens.bin in it or in any subdirectory"
+        out += [(os.path.join(path, d), f"{root}/{d}", root) for d in subs]
+    return out
+
+
+def rolling_windows(offsets: np.ndarray, max_len: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """OLMES/lm-eval rolling windows (rolling_no_prefix=True, context_len=1) of every document, as
+    (start, n_inputs, n_scored) arrays into the token stream: inputs = tokens[start:start + n_inputs], labels =
+    tokens[start + 1:start + n_inputs + 1], only the last n_scored labels count.
+
+    A doc of n tokens has n - 1 scored tokens (its first token is context only). The first window scores tokens
+    1..min(n - 1, max_len); each following window scores the next min(remaining, max_len) tokens and its inputs are
+    the max_len tokens before each window's last token (lm_eval.utils.get_rolling_token_windows +
+    make_disjoint_window). Docs of < 2 tokens get no window (OLMES: sum_logits 0, bytes still counted)."""
+    starts, lens, scored = [], [], []
+    for o0, o1 in zip(offsets[:-1].tolist(), offsets[1:].tolist()):
+        T = o1 - o0 - 1
+        if T < 1:
+            continue
+        f = min(max_len, T)
+        starts.append(o0), lens.append(f), scored.append(f)
+        done = f
+        while done < T:
+            k = min(T - done, max_len)
+            end = done + k  # doc position of the window's last label
+            starts.append(o0 + end - max_len), lens.append(max_len), scored.append(k)
+            done = end
+    return np.asarray(starts, dtype=np.int64), np.asarray(lens, dtype=np.int64), np.asarray(scored, dtype=np.int64)
+
+
+def _eval_rolling_stream(model, tokens: np.ndarray, offsets: np.ndarray, max_len: int, batch_tokens: int,
+                         vocab_size: Optional[int], fp32: bool = False,
+                         window_filter=None) -> Tuple[float, int, int]:
+    """Sum of NLL (nats) and number of scored tokens over OLMES' rolling windows (see rolling_windows); each window
+    is its own attention segment, as in a separate HF forward pass of that window.
+
+    bf16 (fp32=False): windows are packed back to back into forward passes of <= batch_tokens tokens with flash
+    attention (cu_seqlens), positions restarting at 0 in each window. fp32 (model must be fp32): flash attention has
+    no fp32 kernel, so windows are packed into rows of <= max_len tokens, batch_tokens // max_len rows per forward,
+    with sdpa and a block-diagonal causal mask (positions run on within a row; RoPE only sees relative positions)."""
+    starts, lens, scored = rolling_windows(offsets, max_len)
+    if window_filter is not None:  # bool function of the windows' input lengths
+        sel = window_filter(lens)
+        starts, lens, scored = starts[sel], lens[sel], scored[sel]
+    tokens_t = torch.from_numpy(np.asarray(tokens, dtype=np.int64)).cuda()
+    nll_sum = torch.zeros((), dtype=torch.float64, device="cuda")
+    n_scored = int(scored.sum())
+    assert batch_tokens >= max_len
+
+    def add_nll(logits, keep, label_idx):
+        logits = logits[keep]
+        if vocab_size is not None:
+            logits = logits[:, :vocab_size]
+        return F.cross_entropy(logits.float(), tokens_t[label_idx], reduction="sum").double()
+
+    if not fp32:
+        i = 0
+        while i < len(starts):
+            j = i + 1 + int(np.searchsorted(np.cumsum(lens[i + 1:]), batch_tokens - lens[i], side="right"))
+            S, M, K = starts[i:j], lens[i:j], scored[i:j]
+            cu = np.concatenate([[0], np.cumsum(M)])
+            pos = np.arange(cu[-1]) - np.repeat(cu[:-1], M)              # position within the window
+            idx = torch.from_numpy(np.repeat(S, M) + pos).cuda()
+            keep = torch.from_numpy(pos >= np.repeat(M - K, M)).cuda()
+            logits = model(tokens_t[idx][None], target=None, tok_idx=torch.from_numpy(pos).cuda(),
+                           cu_seqlens=torch.tensor(cu, dtype=torch.int32, device="cuda"), max_seqlen=int(M.max()))[0]
+            nll_sum += add_nll(logits, keep, idx[keep] + 1)
+            i = j
+        return nll_sum.item(), n_scored, len(starts)
+
+    # Next-fit windows into rows of <= max_len tokens.
+    row_of, fill, row = np.zeros(len(starts), dtype=np.int64), 0, 0
+    for w, m in enumerate(lens.tolist()):
+        if fill + m > max_len:
+            row, fill = row + 1, 0
+        row_of[w], fill = row, fill + m
+    n_rows = row + 1 if len(starts) else 0
+    row_bounds = np.searchsorted(row_of, np.arange(n_rows + 1))       # windows of row r: row_bounds[r]:row_bounds[r+1]
+    B = max(1, batch_tokens // max_len)
+    for r0 in range(0, n_rows, B):
+        r1 = min(r0 + B, n_rows)
+        w0, w1 = row_bounds[r0], row_bounds[r1]
+        S, M, K, R = starts[w0:w1], lens[w0:w1], scored[w0:w1], row_of[w0:w1] - r0
+        row_len = np.bincount(R, weights=M, minlength=r1 - r0).astype(np.int64)
+        T = int(row_len.max())
+        # column of each window's first token within its row
+        col0 = np.concatenate([[0], np.cumsum(M)[:-1]])
+        col0 = col0 - np.concatenate([[0], np.cumsum(row_len)])[R]
+        seg = np.repeat(np.arange(len(M)), M)
+        pos = np.arange(M.sum()) - np.repeat(np.concatenate([[0], np.cumsum(M)[:-1]]), M)
+        rr, cc = np.repeat(R, M), np.repeat(col0, M) + pos
+        src = np.repeat(S, M) + pos
+        segs = np.full((r1 - r0, T), -1, dtype=np.int64)              # padding: one extra segment per row
+        keep = np.zeros((r1 - r0, T), dtype=bool)
+        lab = np.zeros((r1 - r0, T), dtype=np.int64)
+        lab[rr, cc] = src + 1                                          # label index into the stream (pad: 0)
+        segs[rr, cc] = seg
+        keep[rr, cc] = pos >= np.repeat(M - K, M)
+        lab_t, segs_t = torch.from_numpy(lab).cuda(), torch.from_numpy(segs).cuda()
+        inp_t = tokens_t[(lab_t - 1).clamp(min=0)].masked_fill(segs_t < 0, 0)
+        causal = torch.ones(T, T, dtype=torch.bool, device="cuda").tril()
+        mask = (segs_t[:, :, None] == segs_t[:, None, :]) & causal
+        logits = model(inp_t, target=None, mask=mask[:, None], attn_impl="sdpa")
+        keep_t = torch.from_numpy(keep).cuda()
+        nll_sum += add_nll(logits, keep_t, lab_t[keep_t])
+    return nll_sum.item(), n_scored, len(starts)
+
+
 @torch.inference_mode()
 def eval_on_token_streams(model, val_args: ValidationArgs) -> Dict[str, Dict[str, float]]:
-    """Token-weighted validation cross-entropy (nats/token) and bits per byte on packed pre-tokenized streams.
+    """Token-weighted validation cross-entropy (nats/token) and bits per byte on pre-tokenized streams.
 
-    The stream is cut into consecutive seq_len windows with lingua's one-token overlap (inputs = tokens[i*L:(i+1)*L],
-    labels shifted by one), and attention is masked per document (cu_seqlens), as in training. Labels that start a
-    document (predicted from the previous document's end-of-document token) are not scored. bits per byte = total
-    nats / ln 2 / total UTF-8 bytes of the documents' text.
+    Default ("packed") streams, e.g. dclm_heldout: the stream is cut into consecutive seq_len windows with lingua's
+    one-token overlap (inputs = tokens[i*L:(i+1)*L], labels shifted by one), and attention is masked per document
+    (cu_seqlens), as in training. Labels that start a document (predicted from the previous document's
+    end-of-document token) are not scored. A document crossing a window boundary continues in the next window
+    without its earlier context.
+
+    "rolling" streams (meta.json "eval_mode": "rolling", e.g. Paloma from setup/pretokenize_paloma_qwen3.py):
+    each document is scored on its own exactly like OLMES' rolling loglikelihood with rolling_no_prefix
+    (rolling_windows), logits cut to meta.json's "vocab_size" (the HF export's vocabulary), in the precision set by
+    val_args.token_stream_rolling_dtype (OLMES computes in fp32; see ValidationArgs).
+
+    bits per byte = total nats / ln 2 / total UTF-8 bytes of the documents' text (micro average over the stream,
+    = OLMES' Paloma bits_per_byte).
     """
     L = val_args.token_stream_seq_len
+    assert val_args.token_stream_rolling_dtype in ("fp32", "bf16", "mixed"), val_args.token_stream_rolling_dtype
     results = {}
-    for path in val_args.token_streams:
-        name = os.path.basename(os.path.normpath(path))
+    groups = {}
+    _fp32 = []
+
+    def fp32_model():  # fp32 copy of the (bf16) model, made once, for "rolling" streams
+        if not _fp32:
+            _fp32.append(copy.deepcopy(model).float())
+        return _fp32[0]
+
+    for path, name, group in expand_token_streams(val_args.token_streams):
         tokens = np.memmap(os.path.join(path, "tokens.bin"), dtype=np.uint32, mode="r")
         offsets = np.load(os.path.join(path, "doc_offsets.npy"))
         n_bytes = int(np.load(os.path.join(path, "doc_bytes.npy")).sum())
-        doc_start = np.zeros(len(tokens) + 1, dtype=bool)
-        doc_start[offsets[:-1]] = True
-        nll_sum, n_scored = 0.0, 0
-        for a in range(0, len(tokens) - 1, L):
-            b = min(a + L + 1, len(tokens))
-            toks = torch.from_numpy(np.asarray(tokens[a:b], dtype=np.int64)).cuda()
-            m = b - a - 1
-            starts = [int(x) - a for x in offsets[(offsets > a) & (offsets < a + m)]]
-            cu = [0] + starts + [m]
-            cu_t = torch.tensor(cu, dtype=torch.int32, device="cuda")
-            logits = model(toks[None, :-1], target=None, cu_seqlens=cu_t, max_seqlen=max(np.diff(cu)))
-            nll = F.cross_entropy(logits[0].float(), toks[1:], reduction="none")
-            keep = ~torch.from_numpy(doc_start[a + 1:b]).cuda()
-            nll_sum += nll[keep].double().sum().item()
-            n_scored += int(keep.sum().item())
+        meta_path = os.path.join(path, "meta.json")
+        meta = json.load(open(meta_path)) if os.path.exists(meta_path) else {}
+        extra = {}
+        t0 = time.time()
+        if meta.get("eval_mode") == "rolling":
+            max_len = meta.get("rolling_max_len", L)
+            dtype, below = val_args.token_stream_rolling_dtype, val_args.token_stream_rolling_fp32_below
+            args = (tokens, offsets, max_len, max(val_args.token_stream_rolling_batch_tokens, max_len),
+                    meta.get("vocab_size"))
+            if dtype == "mixed":
+                nll_a, n_a, w_a = _eval_rolling_stream(fp32_model(), *args, fp32=True,
+                                                       window_filter=lambda m: m < below)
+                nll_b, n_b, w_b = _eval_rolling_stream(model, *args, fp32=False, window_filter=lambda m: m >= below)
+                nll_sum, n_scored, n_windows = nll_a + nll_b, n_a + n_b, w_a + w_b
+            else:
+                nll_sum, n_scored, n_windows = _eval_rolling_stream(
+                    fp32_model() if dtype == "fp32" else model, *args, fp32=dtype == "fp32")
+            extra = {"windows": n_windows, "seconds": time.time() - t0}
+        else:
+            doc_start = np.zeros(len(tokens) + 1, dtype=bool)
+            doc_start[offsets[:-1]] = True
+            nll_sum, n_scored = 0.0, 0
+            for a in range(0, len(tokens) - 1, L):
+                b = min(a + L + 1, len(tokens))
+                toks = torch.from_numpy(np.asarray(tokens[a:b], dtype=np.int64)).cuda()
+                m = b - a - 1
+                starts = [int(x) - a for x in offsets[(offsets > a) & (offsets < a + m)]]
+                cu = [0] + starts + [m]
+                cu_t = torch.tensor(cu, dtype=torch.int32, device="cuda")
+                logits = model(toks[None, :-1], target=None, cu_seqlens=cu_t, max_seqlen=max(np.diff(cu)))
+                nll = F.cross_entropy(logits[0].float(), toks[1:], reduction="none")
+                keep = ~torch.from_numpy(doc_start[a + 1:b]).cuda()
+                nll_sum += nll[keep].double().sum().item()
+                n_scored += int(keep.sum().item())
         results[name] = {"ce_per_token": nll_sum / n_scored, "bpb": nll_sum / math.log(2) / n_bytes,
-                         "nll_sum": nll_sum, "tokens_scored": n_scored, "bytes": n_bytes, "docs": len(offsets) - 1}
+                         "nll_sum": nll_sum, "tokens_scored": n_scored, "bytes": n_bytes, "docs": len(offsets) - 1,
+                         **extra}
+        if group is not None:
+            groups.setdefault(group, []).append(results[name]["bpb"])
         logger.info(f"Packed validation on {name}: {results[name]}")
+    for group, bpbs in groups.items():
+        results[f"{group}/mean"] = {"bpb": sum(bpbs) / len(bpbs), "sources": len(bpbs)}
+        logger.info(f"Packed validation on {group}: mean bpb over {len(bpbs)} sources {results[f'{group}/mean']['bpb']}")
     return results
 
 

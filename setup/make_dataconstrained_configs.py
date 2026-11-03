@@ -9,6 +9,10 @@ step count, GPU count and, for decay branches, the checkpoint it starts from). R
     w{width}_s2_bs{B}_lr{lr}_wd{wd}_p{k}       its decay branch evaluated after pass k
     w{width}_u_bs{B}_lr{lr}_wd{wd}[_d1x|_d2x]  ladder data_constrainedv2 (stage 3, configs in experiments/data_constrainedv2/):
                                                 unique data to 4x Chinchilla counting body + head, decay branches at 1x and 2x
+    w{width}_u8x_bs{B}_lr{lr}_wd{wd}[_d1x|_d2x|_d4x]  same, to 8x (--max-mult 8; 32M / 64M-doc stream by length)
+    w{width}_u[8x]d_...                         same on the exact-deduplicated 64M-doc stream (--dedup)
+    w{width}_r_bs{B}_lr{lr}_wd{wd}[_pK]        data_constrainedv2 stage 4: 0.5x Chinchilla (body + head) pool repeated
+                                                --passes times (default 32), decay branches after --eval-passes
     ..._seed{n}                                 another seed (model init)
 
 Model: Qwen3 dense block (pre-norm RMSNorm, per-head QK-norm, SwiGLU 4x width, RoPE 1e6, no biases), head size 128,
@@ -47,14 +51,15 @@ ASSETS = "/home/sgeng/scottg/pretrain/assets"
 TOKENIZER = f"{ASSETS}/models/Qwen3-0.6B-Base-tokenizer"
 STREAM = f"{ASSETS}/data/dclm_qwen3_tokens"
 HELDOUT = f"{ASSETS}/data/dclm_qwen3_tokens/dclm_heldout"
+PALOMA_ROOT = f"{ASSETS}/data/paloma_qwen3"  # 16 Paloma sources for the packed evaluator (setup/pretokenize_paloma_qwen3.py)
 GROUP = "qwen3_ladder_dataconstrained"
 GROUP_V2 = "data_constrainedv2"  # stage 3: unique sweep with Chinchilla = 20 x (body + head)
 PROJECT = {GROUP: "lingua-clean-dataconstrained", GROUP_V2: "lingua-clean-data_constrainedv2"}
 SEQ, VOCAB, HEAD = 4096, 151_936, 128
 SWEEP_PASSES = [1, 2, 3, 4, 6, 8, 12]  # stage 2 branches during the sweep; the main run evaluates at 16
 N_PASSES = 16
-SEQS_PER_GPU = {512: 16, 768: 16, 1152: 8}
-EVAL_GPUS = {512: 1, 768: 2, 1152: 4}
+SEQS_PER_GPU = {512: 16, 768: 16, 1152: 8, 1536: 8}
+EVAL_GPUS = {512: 1, 768: 2, 1152: 4, 1536: 4}
 PALOMA = [
     "paloma_4chan_meta_sep::paloma", "paloma_c4_100_domains::paloma", "paloma_c4_en::paloma",
     "paloma_dolma_100_programing_languages::paloma", "paloma_dolma_100_subreddits::paloma",
@@ -86,31 +91,69 @@ def chinchilla_bh(width):
 
 
 STREAM_32M = f"{ASSETS}/data/dclm_qwen3_tokens_32m"  # dclm_8m_0..3 (~40B tokens), same order as STREAM for 0 and 1
+STREAM_64M = f"{ASSETS}/data/dclm_qwen3_tokens_64m"  # dclm_8m_0..7 (~80B tokens); 4..7 = fresh draw (extend_dclm_subsets)
+STREAM_64M_DEDUP = f"{ASSETS}/data/dclm_qwen3_tokens_64m_dedup"  # STREAM_64M, first copy of each text / URL only
 UNIQUE_MULTS = {"d1x": 1, "d2x": 2}  # decay branches of the 4x main run
 
 
-def unique_runs(width, lr, bs, wd, seed):
-    """Unique-data sweep (Chinchilla = 20 x (body + head)): main run to 4x, decay branches at 1x and 2x. Warmup is
-    1 token per body + head param. Uses the 20B-token stream when 4x fits, else the 32M-doc stream."""
+def unique_runs(width, lr, bs, wd, seed, max_mult=4, dedup=False):
+    """Unique-data sweep (Chinchilla = 20 x (body + head)): main run to max_mult x, decay branches at every lower power
+    of two (1x, 2x[, 4x]). Warmup is 1 token per body + head param. Uses the 20B-token stream when the run fits, else
+    the 32M-doc stream. Runs to 4x are named w{w}_u_..., longer ones w{w}_u{max_mult}x_..."""
     tps = bs * SEQ
     C = chinchilla_bh(width)
     s = shape(width)
-    base = f"w{width}_u_bs{bs}_lr{lr_fmt(lr)}_wd{fmt(wd)}" + (f"_seed{seed}" if seed else "")
+    tag = ("u" if max_mult == 4 else f"u{max_mult}x") + ("d" if dedup else "")
+    base = f"w{width}_{tag}_bs{bs}_lr{lr_fmt(lr)}_wd{fmt(wd)}" + (f"_seed{seed}" if seed else "")
     main_dir = "${oc.env:MIDTRAIN_ROOT}/experiments/" + GROUP_V2 + "/" + base
-    main_steps = round(4 * C / tps)
-    stream = STREAM if main_steps * tps <= 20_000_000_000 else STREAM_32M
-    branches = {tag: round(m * C / tps) for tag, m in UNIQUE_MULTS.items()}
+    main_steps = round(max_mult * C / tps)
+    n_tok = main_steps * tps
+    stream = (STREAM_64M_DEDUP if dedup else STREAM if n_tok <= 20_000_000_000 else STREAM_32M
+              if n_tok <= 40_000_000_000 else STREAM_64M)
+    branches = {f"d{m}x": round(m * C / tps) for m in (1, 2, 4, 8) if m < max_mult}
     kw = dict(warmup_params=s["body"] + s["embedding"], stream=stream, group=GROUP_V2)
     out = []
     cfg, entry = config(width, base, main_steps, lr, bs, wd, seed, "unique", main_steps * tps,
                         extra_saves={decay_start(e) for e in branches.values()}, **kw)
-    entry.update(stage=3, eval_point="4x", main=base)
+    entry.update(stage=3, eval_point=f"{max_mult}x", main=base)
     out.append((base, cfg, entry))
-    for tag, e in branches.items():
-        cfg, entry = config(width, f"{base}_{tag}", e, lr, bs, wd, seed, "unique", main_steps * tps,
+    for btag, e in branches.items():
+        cfg, entry = config(width, f"{base}_{btag}", e, lr, bs, wd, seed, "unique", main_steps * tps,
                             branch_from=f"{main_dir}/checkpoints/{decay_start(e):010d}", **kw)
-        entry.update(stage=3, eval_point=tag, main=base)
-        out.append((f"{base}_{tag}", cfg, entry))
+        entry.update(stage=3, eval_point=btag, main=base)
+        out.append((f"{base}_{btag}", cfg, entry))
+    return out
+
+
+def pool_tokens_v2(width, mult):
+    """mult x Chinchilla (body + head), rounded down to a whole number of sequences divisible by 256."""
+    seqs = int(mult * chinchilla_bh(width)) // SEQ
+    return (seqs - seqs % 256) * SEQ
+
+
+def repeat_runs_v2(width, lr, bs, wd, seed, pool_mult=0.5, n_passes=32, eval_passes=(1, 2, 4, 8, 16, 24)):
+    """Repeated-data sweep on ladder data_constrainedv2 (stage 4): a pool of pool_mult x Chinchilla (body + head)
+    tokens, re-shuffled and re-packed every pass, main run to n_passes with decay branches after eval_passes.
+    Named w{w}_r_bs{B}_lr{lr}_wd{wd}[_p{k}]; warmup 1 token per body + head param."""
+    tps = bs * SEQ
+    s = shape(width)
+    pool = pool_tokens_v2(width, pool_mult)
+    assert pool % tps == 0, (width, bs)
+    per_pass = pool // tps
+    base = f"w{width}_r_bs{bs}_lr{lr_fmt(lr)}_wd{fmt(wd)}" + (f"_seed{seed}" if seed else "")
+    main_dir = "${oc.env:MIDTRAIN_ROOT}/experiments/" + GROUP_V2 + "/" + base
+    branches = {f"p{k}": k * per_pass for k in eval_passes if k < n_passes}
+    kw = dict(warmup_params=s["body"] + s["embedding"], stream=STREAM, group=GROUP_V2)
+    out = []
+    cfg, entry = config(width, base, n_passes * per_pass, lr, bs, wd, seed, "repeat", pool,
+                        extra_saves={decay_start(e) for e in branches.values()}, **kw)
+    entry.update(stage=4, eval_point=f"p{n_passes}", main=base, pool_tokens=pool)
+    out.append((base, cfg, entry))
+    for btag, e in branches.items():
+        cfg, entry = config(width, f"{base}_{btag}", e, lr, bs, wd, seed, "repeat", pool,
+                            branch_from=f"{main_dir}/checkpoints/{decay_start(e):010d}", **kw)
+        entry.update(stage=4, eval_point=btag, main=base, pool_tokens=pool)
+        out.append((f"{base}_{btag}", cfg, entry))
     return out
 
 
@@ -141,6 +184,9 @@ def config(width, name, steps, lr, bs, wd, seed, mode, n_tokens, branch_from=Non
     gpus = max(1, bs // SEQS_PER_GPU[width])
     tps = bs * SEQ
     warmup = round((warmup_params or s["body"]) / tps)
+    # data_constrainedv2 scores Paloma with the packed evaluator (matches OLMES to ~1e-4 BPB, ~10x cheaper);
+    # validation runs on one GPU and OLMES is skipped.
+    packed_paloma = group == GROUP_V2
     dump_every = max(100, round(steps / 20))  # resumption checkpoints (preemptible QoS)
     cfg = {
         "name": f"{group}-{name}".replace("_", "-"),
@@ -170,17 +216,18 @@ def config(width, name, steps, lr, bs, wd, seed, mode, n_tokens, branch_from=Non
         "profiling": {"run": False},
         "logging": {"freq": 10, "wandb": {"project": PROJECT[group],
                                           "entity": "${oc.env:WANDB_ENTITY,null}", "resume": "allow"}},
-        "async_eval_gpus": EVAL_GPUS[width],
+        "async_eval_gpus": 1 if packed_paloma else EVAL_GPUS[width],
         "eval_backend": "olmes",
         "eval": {
             "dump_dir": "${oc.env:EVAL_ROOT}/slurm_eval_logs",
             "generator": {"max_tokens": SEQ, "temperature": 0.0, "dtype": "bf16"},
             "harness": None,
-            "olmes": {"tasks": PALOMA, "model_type": "hf", "tokenizer_path": TOKENIZER, "tokenizer_revision": "main",
+            "olmes": {"tasks": [] if packed_paloma else PALOMA, "model_type": "hf", "tokenizer_path": TOKENIZER, "tokenizer_revision": "main",
                       "max_length": SEQ, "trust_remote_code": True, "olmes_env": "${oc.env:OLMES_CONDA_ENV}",
                       "timeout_hours": 10.0, "rolling_no_prefix": True},
             "validation": {"max_steps": None, "use_val_from_train_src": False, "root_dir": f"{ASSETS}/data",
-                           "sources": [], "token_streams": [HELDOUT], "token_stream_seq_len": SEQ},
+                           "sources": [], "token_streams": [HELDOUT] + ([PALOMA_ROOT] if packed_paloma else []),
+                           "token_stream_seq_len": SEQ},
         },
     }
     entry = {"name": name, "width": width, "steps": steps, "gpus": gpus, "lr": lr, "bs": bs, "wd": wd, "seed": seed,
@@ -256,19 +303,23 @@ def extension_runs(width, lr, bs, wd, seed, n_passes, eval_passes):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--width", type=int, required=True, choices=[512, 768, 1152])
-    ap.add_argument("--stage", type=int, required=True, choices=[1, 2, 3],
-                    help="3 = unique sweep, Chinchilla incl. head (ladder data_constrainedv2, own config dir + manifest)")
+    ap.add_argument("--width", type=int, required=True, choices=[512, 768, 1152, 1536])
+    ap.add_argument("--stage", type=int, required=True, choices=[1, 2, 3, 4],
+                    help="3 = unique sweep, 4 = repeated-data sweep; both Chinchilla incl. head (ladder data_constrainedv2, own config dir + manifest)")
     ap.add_argument("--lr", type=float, nargs="+", required=True)
     ap.add_argument("--bs", type=int, nargs="+", required=True)
     ap.add_argument("--wd", type=float, nargs="+", required=True)
     ap.add_argument("--seed", type=int, nargs="+", default=[0])
     ap.add_argument("--final", action="store_true", help="stage 2 final run: a decay branch after every pass")
-    ap.add_argument("--passes", type=int, default=N_PASSES, help="stage 2 --final run length in passes")
+    ap.add_argument("--passes", type=int, default=N_PASSES, help="stage 2 --final / stage 4 run length in passes")
+    ap.add_argument("--max-mult", type=int, default=4, help="stage 3: main run length in Chinchillas (4 or 8)")
+    ap.add_argument("--dedup", action="store_true", help="stage 3: use the exact-deduplicated stream (names ..._u[8x]d_)")
+    ap.add_argument("--pool-mult", type=float, default=0.5, help="stage 4: pool size in Chinchillas")
+    ap.add_argument("--eval-passes", type=int, nargs="*", default=[1, 2, 4, 8, 16, 24], help="stage 4 decay branches")
     ap.add_argument("--extend", type=int, help="extend the --final run(s) to this many passes (from 13.5 passes)")
     ap.add_argument("--extend-evals", type=int, nargs="*", default=[], help="decay branches of the extension")
     a = ap.parse_args()
-    out_dir = os.path.join(ROOT, "apps/main/configs/experiments", GROUP_V2) if a.stage == 3 else OUT
+    out_dir = os.path.join(ROOT, "apps/main/configs/experiments", GROUP_V2) if a.stage >= 3 else OUT
     os.makedirs(out_dir, exist_ok=True)
     man_path = f"{out_dir}/manifest.json"
     manifest = json.load(open(man_path)) if os.path.exists(man_path) else {}
@@ -278,7 +329,9 @@ def main():
             for wd in a.wd:
                 for seed in a.seed:
                     todo = (extension_runs(a.width, lr, bs, wd, seed, a.extend, a.extend_evals) if a.extend
-                            else unique_runs(a.width, lr, bs, wd, seed) if a.stage == 3
+                            else unique_runs(a.width, lr, bs, wd, seed, a.max_mult, a.dedup) if a.stage == 3
+                            else repeat_runs_v2(a.width, lr, bs, wd, seed, a.pool_mult, a.passes, a.eval_passes)
+                            if a.stage == 4
                             else runs_for(a.width, a.stage, lr, bs, wd, seed, a.final, a.passes))
                     for name, cfg, entry in todo:
                         with open(f"{out_dir}/{name}.yaml", "w") as f:

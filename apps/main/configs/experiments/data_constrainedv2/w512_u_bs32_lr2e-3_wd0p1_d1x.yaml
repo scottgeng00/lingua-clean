@@ -91,23 +91,7 @@ eval:
     dtype: bf16
   harness: null
   olmes:
-    tasks:
-    - paloma_4chan_meta_sep::paloma
-    - paloma_c4_100_domains::paloma
-    - paloma_c4_en::paloma
-    - paloma_dolma_100_programing_languages::paloma
-    - paloma_dolma_100_subreddits::paloma
-    - paloma_dolma-v1_5::paloma
-    - paloma_falcon-refinedweb::paloma
-    - paloma_gab::paloma
-    - paloma_m2d2_s2orc_unsplit::paloma
-    - paloma_m2d2_wikipedia_unsplit::paloma
-    - paloma_manosphere_meta_sep::paloma
-    - paloma_mc4::paloma
-    - paloma_ptb::paloma
-    - paloma_redpajama::paloma
-    - paloma_twitterAAE_HELM_fixed::paloma
-    - paloma_wikitext_103::paloma
+    tasks: []
     model_type: hf
     tokenizer_path: /home/sgeng/scottg/pretrain/assets/models/Qwen3-0.6B-Base-tokenizer
     tokenizer_revision: main
@@ -123,4 +107,5 @@ eval:
     sources: []
     token_streams:
     - /home/sgeng/scottg/pretrain/assets/data/dclm_qwen3_tokens/dclm_heldout
+    - /home/sgeng/scottg/pretrain/assets/data/paloma_qwen3
     token_stream_seq_len: 4096

@@ -168,7 +168,9 @@ def do_gpu_work(cfg: OlmesEvalArgs):
 
     # --- Convert to HF ---
     hf_path = Path(cfg.ckpt_dir) / "hf"
-    if hf_path.exists() and (hf_path / "success.txt").exists():
+    if not cfg.olmes.tasks:
+        logger.info("No OLMES tasks (e.g. Paloma scored via validation.token_streams); skipping HF conversion")
+    elif hf_path.exists() and (hf_path / "success.txt").exists():
         logger.info(f"HF checkpoint already exists at {hf_path}, skipping conversion")
     elif get_global_rank() == 0:
         logger.info(f"Converting consolidated checkpoint to HF format -> {hf_path}")
@@ -494,7 +496,7 @@ def launch_olmes_eval(cfg: OlmesEvalArgs):
     olmes_results = None
     hf_path = str(Path(cfg.ckpt_dir) / "hf")
     olmes_output_dir = str(Path(cfg.dump_dir) / "olmes_results")
-    olmes_metrics = run_olmes(hf_path, cfg.olmes, olmes_output_dir)
+    olmes_metrics = run_olmes(hf_path, cfg.olmes, olmes_output_dir) if cfg.olmes.tasks else None
     if olmes_metrics is not None:
         olmes_results = parse_olmes_results(olmes_metrics)
         with open(Path(cfg.dump_dir) / "results.json", "w") as f:
@@ -523,6 +525,15 @@ def launch_olmes_eval(cfg: OlmesEvalArgs):
             val_log_path = Path(cfg.metric_log_dir) / "metrics.validation.jsonl"
             with open(val_log_path, mode="a") as f:
                 print(json.dumps(timestamp | val_results), file=f, flush=True)
+            # Paloma scored by the packed evaluator (validation.token_streams .../paloma_qwen3) is also written to
+            # metrics.paloma_np.jsonl under the OLMES keys, so readers of that file need no change.
+            packed = {f"olmes_eval/paloma_{k.split('/', 1)[1]}::paloma/primary_score": v["bpb"]
+                      for k, v in val_results.items()
+                      if k.startswith("paloma_qwen3/") and k != "paloma_qwen3/mean" and isinstance(v, dict)}
+            if packed and not (olmes_results and any("::paloma/" in k for k in olmes_results)):
+                with open(Path(cfg.metric_log_dir) / "metrics.paloma_np.jsonl", mode="a") as f:
+                    print(json.dumps(timestamp | {"rolling_no_prefix": True, "packed_evaluator": True} | packed),
+                          file=f, flush=True)
 
     # --- Step 4: Log to wandb ---
     if wandb_run is not None:
