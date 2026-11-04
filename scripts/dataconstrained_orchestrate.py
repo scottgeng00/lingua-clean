@@ -70,6 +70,8 @@ def main():
             continue
         if f"lingua_clean_pt_experiments_{a.group}_{name}" in active:
             continue  # queued or running (or finishing: the eval launch follows the final save)
+        if os.path.isfile(f"{runs}/{name}/evals/{e['steps']:010d}/validation.json"):
+            continue  # trained and evaluated (its checkpoints may have been pruned to consolidated weights only)
         if ckpt_done(f"{runs}/{name}/checkpoints/{e['steps']:010d}"):
             # Trained; make sure its eval was launched (a failed launch or a preemption right after the final save
             # leaves no evals/<step> folder).

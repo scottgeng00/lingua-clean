@@ -15,6 +15,12 @@ repeats a prefix (the pool).
     .venv-kd/bin/python -m setup.pretokenize_dclm_qwen3
     .venv-kd/bin/python -m setup.pretokenize_dclm_qwen3 --subsets dclm_8m_{0..7} --out .../dclm_qwen3_tokens_64m \
         --copy-from .../dclm_qwen3_tokens_32m      # tokenizes only dclm_8m_4..7
+    .venv-kd/bin/python -m setup.pretokenize_dclm_qwen3 --data .../fineweb_edu_subsets --subsets fwedu_8m_{0..3} \
+        --out .../fwedu_qwen3_tokens            # FineWeb-Edu (same layout, "text" field)
+
+Heldout sets (+ doc_bytes.npy for bits per byte; read by ValidationArgs.token_streams in apps/main/eval.py):
+    .venv-kd/bin/python -c "from setup.pretokenize_dclm_qwen3 import pretokenize_heldout as f; f()"   # dclm_heldout
+    .venv-kd/bin/python -c "from setup.pretokenize_dclm_qwen3 import pretokenize_heldout as f; f(SRC_JSONL, OUT_DIR)"
 """
 
 import argparse
@@ -44,13 +50,13 @@ def _tokenizer():
     return _tok
 
 
-def chunk_path(subset, c):
-    return f"{DATA}/{subset}/{subset}.chunk.{c:02d}.jsonl"
+def chunk_path(data, subset, c):
+    return f"{data}/{subset}/{subset}.chunk.{c:02d}.jsonl"
 
 
 def tokenize_part(task):
     """Tokenize lines part, part + PARTS, ... of one chunk file -> tmp tokens file + per-line lengths."""
-    subset, c, part, tmp = task
+    subset, c, part, tmp, data = task
     tok = _tokenizer()
     eos = tok.eos_token_id
     lengths, out = [], open(f"{tmp}/{subset}.{c:02d}.{part}.u32", "wb")
@@ -63,7 +69,7 @@ def tokenize_part(task):
             lengths.append(len(a))
         texts.clear()
 
-    with open(chunk_path(subset, c), "rb", buffering=1 << 24) as f:
+    with open(chunk_path(data, subset, c), "rb", buffering=1 << 24) as f:
         for i, line in enumerate(f):
             if i % PARTS == part:
                 texts.append(orjson.loads(line)["text"])
@@ -107,6 +113,7 @@ def copy_block(task):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--subsets", nargs="+", default=["dclm_8m_0", "dclm_8m_1"])
+    ap.add_argument("--data", default=DATA, help="dir holding <subset>/dataset.json + <subset>.chunk.NN.jsonl")
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--workers", type=int, default=140)
     ap.add_argument("--copy-from", help="existing output dir whose subsets are a prefix of --subsets: their tokens are "
@@ -114,7 +121,7 @@ def main():
     a = ap.parse_args()
     tmp = f"{a.out}/tmp"
     os.makedirs(tmp, exist_ok=True)
-    rows = {s: json.load(open(f"{DATA}/{s}/dataset.json"))["rows"] for s in a.subsets}
+    rows = {s: json.load(open(f"{a.data}/{s}/dataset.json"))["rows"] for s in a.subsets}
     copied = []
     if a.copy_from:
         src_meta = json.load(open(f"{a.copy_from}/meta.json"))
@@ -124,7 +131,7 @@ def main():
             assert src_meta["subsets"][s]["docs"] == rows[s], s
         src_offsets = np.load(f"{a.copy_from}/doc_offsets.npy")
 
-    tasks = [(s, c, p, tmp) for s in a.subsets if s not in copied for c in range(N_CHUNKS) for p in range(PARTS)]
+    tasks = [(s, c, p, tmp, a.data) for s in a.subsets if s not in copied for c in range(N_CHUNKS) for p in range(PARTS)]
     with Pool(a.workers) as pool:
         for k, (s, c, p, n) in enumerate(pool.imap_unordered(tokenize_part, tasks)):
             print(f"tokenized {k + 1}/{len(tasks)}: {s} chunk {c} part {p} ({n:,} docs)", flush=True)
@@ -172,7 +179,7 @@ def main():
             "subsets": {s: {"first_doc": s_starts[s], "docs": rows[s],
                             "tokens": int(offsets[s_starts[s] + rows[s]] - offsets[s_starts[s]])} for s in a.subsets},
             "docs": len(lengths), "tokens": int(offsets[-1]), "script": "setup/pretokenize_dclm_qwen3.py",
-            "copied_from": a.copy_from}
+            "copied_from": a.copy_from, "data": a.data}
     json.dump(meta, open(f"{a.out}/meta.json", "w"), indent=1)
     for f in os.listdir(tmp):
         os.remove(f"{tmp}/{f}")

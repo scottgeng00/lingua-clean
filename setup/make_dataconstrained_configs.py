@@ -93,10 +93,12 @@ def chinchilla_bh(width):
 STREAM_32M = f"{ASSETS}/data/dclm_qwen3_tokens_32m"  # dclm_8m_0..3 (~40B tokens), same order as STREAM for 0 and 1
 STREAM_64M = f"{ASSETS}/data/dclm_qwen3_tokens_64m"  # dclm_8m_0..7 (~80B tokens); 4..7 = fresh draw (extend_dclm_subsets)
 STREAM_64M_DEDUP = f"{ASSETS}/data/dclm_qwen3_tokens_64m_dedup"  # STREAM_64M, first copy of each text / URL only
+FWEDU_STREAM = f"{ASSETS}/data/fwedu_qwen3_tokens"  # fineweb-edu-dedup fwedu_8m_0..3, 32M docs, 32.2B tokens
+FWEDU_HELDOUT = f"{FWEDU_STREAM}/fwedu_heldout"  # 10k docs, 9.9M tokens
 UNIQUE_MULTS = {"d1x": 1, "d2x": 2}  # decay branches of the 4x main run
 
 
-def unique_runs(width, lr, bs, wd, seed, max_mult=4, dedup=False):
+def unique_runs(width, lr, bs, wd, seed, max_mult=4, dedup=False, fwedu=False):
     """Unique-data sweep (Chinchilla = 20 x (body + head)): main run to max_mult x, decay branches at every lower power
     of two (1x, 2x[, 4x]). Warmup is 1 token per body + head param. Uses the 20B-token stream when the run fits, else
     the 32M-doc stream. Runs to 4x are named w{w}_u_..., longer ones w{w}_u{max_mult}x_..."""
@@ -104,11 +106,14 @@ def unique_runs(width, lr, bs, wd, seed, max_mult=4, dedup=False):
     C = chinchilla_bh(width)
     s = shape(width)
     tag = ("u" if max_mult == 4 else f"u{max_mult}x") + ("d" if dedup else "")
+    if fwedu:  # FineWeb-Edu stream (cross-dataset transfer), named w{w}_fe[{m}x]_...
+        assert not dedup
+        tag = tag.replace("u", "fe", 1)
     base = f"w{width}_{tag}_bs{bs}_lr{lr_fmt(lr)}_wd{fmt(wd)}" + (f"_seed{seed}" if seed else "")
     main_dir = "${oc.env:MIDTRAIN_ROOT}/experiments/" + GROUP_V2 + "/" + base
     main_steps = round(max_mult * C / tps)
     n_tok = main_steps * tps
-    stream = (STREAM_64M_DEDUP if dedup else STREAM if n_tok <= 20_000_000_000 else STREAM_32M
+    stream = (FWEDU_STREAM if fwedu else STREAM_64M_DEDUP if dedup else STREAM if n_tok <= 20_000_000_000 else STREAM_32M
               if n_tok <= 40_000_000_000 else STREAM_64M)
     branches = {f"d{m}x": round(m * C / tps) for m in (1, 2, 4, 8) if m < max_mult}
     kw = dict(warmup_params=s["body"] + s["embedding"], stream=stream, group=GROUP_V2)
@@ -180,6 +185,8 @@ def decay_start(steps):
 
 def config(width, name, steps, lr, bs, wd, seed, mode, n_tokens, branch_from=None, extra_saves=(), warmup_params=None,
            stream=STREAM, group=GROUP):
+    # FineWeb-Edu runs are scored on both heldouts (own first) + Paloma; DCLM runs on dclm_heldout + Paloma.
+    heldouts = [FWEDU_HELDOUT, HELDOUT] if stream == FWEDU_STREAM else [HELDOUT]
     s = shape(width)
     gpus = max(1, bs // SEQS_PER_GPU[width])
     tps = bs * SEQ
@@ -226,7 +233,7 @@ def config(width, name, steps, lr, bs, wd, seed, mode, n_tokens, branch_from=Non
                       "max_length": SEQ, "trust_remote_code": True, "olmes_env": "${oc.env:OLMES_CONDA_ENV}",
                       "timeout_hours": 10.0, "rolling_no_prefix": True},
             "validation": {"max_steps": None, "use_val_from_train_src": False, "root_dir": f"{ASSETS}/data",
-                           "sources": [], "token_streams": [HELDOUT] + ([PALOMA_ROOT] if packed_paloma else []),
+                           "sources": [], "token_streams": heldouts + ([PALOMA_ROOT] if packed_paloma else []),
                            "token_stream_seq_len": SEQ},
         },
     }
@@ -316,6 +323,8 @@ def main():
     ap.add_argument("--dedup", action="store_true", help="stage 3: use the exact-deduplicated stream (names ..._u[8x]d_)")
     ap.add_argument("--pool-mult", type=float, default=0.5, help="stage 4: pool size in Chinchillas")
     ap.add_argument("--eval-passes", type=int, nargs="*", default=[1, 2, 4, 8, 16, 24], help="stage 4 decay branches")
+    ap.add_argument("--fwedu", action="store_true", help="stage 3: train on the FineWeb-Edu stream (names ..._fe_)")
+    ap.add_argument("--skip-existing", action="store_true", help="don't rewrite configs already in the manifest")
     ap.add_argument("--extend", type=int, help="extend the --final run(s) to this many passes (from 13.5 passes)")
     ap.add_argument("--extend-evals", type=int, nargs="*", default=[], help="decay branches of the extension")
     a = ap.parse_args()
@@ -329,11 +338,13 @@ def main():
             for wd in a.wd:
                 for seed in a.seed:
                     todo = (extension_runs(a.width, lr, bs, wd, seed, a.extend, a.extend_evals) if a.extend
-                            else unique_runs(a.width, lr, bs, wd, seed, a.max_mult, a.dedup) if a.stage == 3
+                            else unique_runs(a.width, lr, bs, wd, seed, a.max_mult, a.dedup, a.fwedu) if a.stage == 3
                             else repeat_runs_v2(a.width, lr, bs, wd, seed, a.pool_mult, a.passes, a.eval_passes)
                             if a.stage == 4
                             else runs_for(a.width, a.stage, lr, bs, wd, seed, a.final, a.passes))
                     for name, cfg, entry in todo:
+                        if a.skip_existing and name in manifest:
+                            continue
                         with open(f"{out_dir}/{name}.yaml", "w") as f:
                             f.write(f"# Generated by setup/make_dataconstrained_configs.py ({entry['eval_point']}, "
                                     f"{entry['steps']} steps, {entry['gpus']} GPU(s)).\n")
