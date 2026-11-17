@@ -52,6 +52,9 @@ CLUSTERS = {c.name: c for c in (
         name="h100-dm1", names=("fair-cw-use1-1",), gpu_types=("h100",),
         account="dream", partition="h100_mdf", qos="h100_mdf_lowest", high_qos="h100_mdf_explore",
         gpus_per_node=8, cpus_per_gpu=16, mem_per_gpu_gb=220, arch="x86_64",
+        # 8 connections let FSDP all-gathers overlap with compute: +2.2-2.6% tok/s/GPU on w1152 at 4 nodes, same loss.
+        # FA3 (bin/build_fa3_h100.sh) for document-masked attention: a further +6.5%.
+        env={"CUDA_DEVICE_MAX_CONNECTIONS": "8", "LINGUA_FA3_SITE": f"{PRETRAIN_ROOT}/speed-extras-h100/fa3_site"},
         notes="FAIR CW USE1-1 (DM1): 8x H100 per node, 128 CPUs, 1.86 TB; no /checkpoint/mnm (team dir /checkpoint/dream)",
     ),
     Cluster(

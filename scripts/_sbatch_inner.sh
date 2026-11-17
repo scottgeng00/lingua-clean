@@ -30,7 +30,7 @@ fi
 export WANDB_MODE="${WANDB_MODE:-online}"
 export WANDB_INIT_TIMEOUT=300
 export WANDB__SERVICE_WAIT=300
-export CUDA_DEVICE_MAX_CONNECTIONS=1
+export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"  # cluster profiles may raise it (lingua/cluster.py)
 export TORCH_NCCL_AVOID_RECORD_STREAMS=1
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512,garbage_collection_threshold:0.8
 
