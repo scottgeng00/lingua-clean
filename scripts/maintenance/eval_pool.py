@@ -44,7 +44,7 @@ def worker(gpu, deadline, idle_exit):
         job = None
         with lock:
             for jid, dump in pending():
-                if os.path.exists(f"{dump}/validation.json"):
+                if any(os.path.exists(f"{dump}/{f}") for f in ("validation.json", "olmes_results/metrics.json")):
                     continue
                 if claim(jid, dump):
                     job = (jid, dump)
@@ -66,7 +66,7 @@ def worker(gpu, deadline, idle_exit):
             rc = subprocess.run([f"{REPO}/.venv-kd/bin/python", "-u", "-m", "apps.main.eval_olmes",
                                  f"config={dump}/base_config.yaml"], cwd=REPO, env=env, stdout=log,
                                 stderr=subprocess.STDOUT).returncode
-        ok = os.path.exists(f"{dump}/validation.json")
+        ok = any(os.path.exists(f"{dump}/{f}") for f in ("validation.json", "olmes_results/metrics.json"))
         print(f"[{os.uname().nodename} gpu{gpu}] {dump} rc={rc} ok={ok} {time.time() - t0:.0f}s", flush=True)
         if not ok:
             os.remove(f"{dump}/.pool_claim")  # let a later pass (or a resubmitted job) retry
