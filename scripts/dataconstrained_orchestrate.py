@@ -34,7 +34,7 @@ def launch(entry, dry, group):
     env = {k: v for k, v in os.environ.items() if k.lower() not in ("http_proxy", "https_proxy")}
     env.update(CONFIG=f"experiments/{group}/{entry['name']}", NNODES=str(-(-gpus // 4)), GPUS_PER_NODE=str(per_node),
                CPUS_PER_NODE=str(32 * per_node), MEM_PER_NODE=f"{180 * per_node}G", STEPS_OVERRIDE=str(entry["steps"]),
-               TIME_LIMIT="3-00:00:00", SLURM_EXCLUDE=EXCLUDE, SLURM_QOS="g3_comm_shared")
+               TIME_LIMIT="3-00:00:00", SLURM_EXCLUDE=EXCLUDE, SLURM_QOS=entry.get("qos", "g3_comm_shared"))
     if dry:
         return "dry-run"
     cmd = f"cd {ROOT} && source scripts/env.sh >/dev/null && bash scripts/launch_pretrain.sh"

@@ -1555,6 +1555,11 @@ class DataArgs:
     token_stream_mode: str = "unique"
     token_stream_tokens: Optional[int] = None
     token_stream_seed: int = 0
+    # Optional second pre-tokenized stream (read once, "unique" mode) mixed in at a fixed fraction of sequences
+    # (lingua/token_stream.py MixedTokenStream); token_stream_mix_tokens = how much of it may be read.
+    token_stream_mix_dir: Optional[str] = None
+    token_stream_mix_ratio: float = 0.0
+    token_stream_mix_tokens: Optional[int] = None
 
     # Synthetic context (kept for orig_data compatibility)
     synth_context_mode: Optional[str] = None
@@ -1593,6 +1598,8 @@ class DataArgs:
     use_kl_distillation: bool = False
     kl_temperature: float = 2.0
     kl_alpha: float = 0.5
+    # Classic KD only: skip the generic per-token teacher NLL pass (KD recomputes the teacher logits itself).
+    kd_skip_teacher_nll: bool = False
     kl_chunk_size: int = 128
 
     # ----- Reverse KL pure / mode-seeking (MiniLLM-style) -----

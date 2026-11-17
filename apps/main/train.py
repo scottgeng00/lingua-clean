@@ -35,7 +35,7 @@ from lingua.data import (
     build_dataloader_from_args,
     init_dataloader_state_from_args,
 )
-from lingua.token_stream import PinnedPrefetcher, TokenStream, init_token_stream_state, token_stream_batches
+from lingua.token_stream import MixedTokenStream, PinnedPrefetcher, TokenStream, init_token_stream_state, token_stream_batches
 from lingua.fa4_attention import fa4_available
 from lingua.online_data import (
     ExcessLossController,
@@ -2703,6 +2703,10 @@ def train(args: TrainArgs):
             if args.data.token_stream_dir:
                 stream = TokenStream(args.data.token_stream_dir, args.data.token_stream_mode,
                                      args.data.token_stream_tokens, args.data.seq_len, args.data.token_stream_seed)
+                if args.data.token_stream_mix_dir:
+                    stream = MixedTokenStream(stream, TokenStream(args.data.token_stream_mix_dir, "unique",
+                                                                  args.data.token_stream_mix_tokens, args.data.seq_len),
+                                              args.data.token_stream_mix_ratio)
                 logger.info(f"Token stream resumes at global sequence {train_state.data_loader_state['next_seq']:,}")
                 data_loader = PinnedPrefetcher(token_stream_batches(stream, args.data.batch_size, dp_rank, dp_degree,
                                                                     train_state.data_loader_state))
@@ -3440,7 +3444,10 @@ def train(args: TrainArgs):
                 if should_log_routing:
                     logger.info(routing_debug_line.replace(f"step={train_state.step}", f"step={train_state.step + 1}"))
 
-            elif teacher_model is not None and (needs_kl or teacher_logprobs is None):
+            elif (teacher_model is not None and (needs_kl or teacher_logprobs is None)
+                  and not getattr(args.data, 'kd_skip_teacher_nll', False)):
+                # kd_skip_teacher_nll: classic KD recomputes the (document-masked) teacher logits itself and never
+                # reads teacher_logprobs, so this extra unmasked teacher forward is skipped.
                 with torch.inference_mode():
                     teacher_out = teacher_model(input_ids, use_cache=False)
                     teacher_lp = F.log_softmax(teacher_out.logits, dim=-1)

@@ -13,11 +13,17 @@ Two modes over a prefix of the global document order:
 
 Sequence i is stream[i * L : i * L + L + 1] (inputs = first L tokens, labels = last L), the same one-token overlap as
 lingua's pack_tokens, with cu_seqlens = [0, <document starts inside the input window>, L].
+
+MixedTokenStream interleaves two streams at a fixed fraction r = a / b of sequences (= of tokens): global sequence i
+comes from the second stream iff floor((i + 1) a / b) > floor(i a / b), as its sequence floor(i a / b); otherwise it
+is the first stream's sequence i - floor(i a / b). Still a pure function of i, and every b consecutive sequences hold
+exactly a from the second stream.
 """
 
 import json
 import logging
 import os
+from fractions import Fraction
 from functools import lru_cache
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -90,6 +96,22 @@ class TokenStream:
         # Python ints: numpy scalars here would reach flash-attn's max_seqlen as traced tensors under torch.compile.
         cu = [0] + [int(s) for s in doc_starts if 0 < s < self.L] + [self.L]
         return views, cu
+
+
+class MixedTokenStream:
+    def __init__(self, first: TokenStream, second: TokenStream, ratio: float):
+        assert first.L == second.L, (first.L, second.L)
+        r = Fraction(ratio).limit_denominator(1000)
+        assert 0 < r < 1, ratio
+        self.first, self.second, self.L = first, second, first.L
+        self.a, self.b = r.numerator, r.denominator
+        logger.info(f"MixedTokenStream: {r} of sequences from {second.path}, the rest from {first.path}")
+
+    def sequence(self, i: int) -> Tuple[np.ndarray, List[int]]:
+        k = i * self.a // self.b
+        if (i + 1) * self.a // self.b > k:
+            return self.second.sequence(k)
+        return self.first.sequence(i - k)
 
 
 def token_stream_batches(stream: TokenStream, batch_size: int, rank: int, world_size: int,
