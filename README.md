@@ -170,6 +170,11 @@ synthetic data is generated with the sibling repo
 
 ## 1. Environments
 
+Start with `bash bin/setup_cluster.sh`: it checks the cluster profile, the `~/scottg/pretrain` link to this
+cluster's storage, uv and its CPython 3.11 / 3.12, and every venv below (plus simplescale's), and with
+`--install` builds whatever is missing or was built for another architecture. Venvs are per cluster
+(aarch64 on Dalton, x86_64 on DM1 / H200): never copy `.venv*`, `wheelhouse/` or `cuda-12.9/` between clusters.
+
 There are three Python environments:
 
 | Env | Built by | Used for |
