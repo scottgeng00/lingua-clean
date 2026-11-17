@@ -180,14 +180,18 @@ class LMTransformer(BaseTransformer):
         max_seqlen: Optional[int] = None,  # For FA2 varlen
         fused_ce: bool = False,  # with a target: LM head + loss via linear_cross_entropy (no fp32 logits)
         fa4_attn: bool = False,  # with cu_seqlens: FlashAttention 4 kernels (lingua/fa4_attention.py, fa4_available())
+        fa3_attn: bool = False,  # with cu_seqlens: FlashAttention 3 kernels (lingua/fa3_attention.py, fa3_available())
     ):
         bsz, seqlen = token_values.shape
 
         h = self.tok_embeddings(token_values)
 
-        # Use FA4 (if requested) or FA2 varlen if cu_seqlens is provided — masking is handled internally
+        # Use FA4 / FA3 (if requested) or FA2 varlen if cu_seqlens is provided — masking is handled internally
         if cu_seqlens is not None and fa4_attn:
             attn_impl = "fa4_varlen"
+            mask = None
+        elif cu_seqlens is not None and fa3_attn:
+            attn_impl = "fa3_varlen"
             mask = None
         elif cu_seqlens is not None and HAS_FLASH_ATTN:
             attn_impl = "fa2_varlen"

@@ -227,7 +227,8 @@ for high priority). Any variable you export before sourcing wins. To add a clust
 Consumers: `scripts/launch_pretrain.sh` (node shape), `scripts/dataconstrained_orchestrate.py` (nodes = GPUs /
 GPUs per node; a manifest `"qos": "high"` means the profile's high QoS), async evals in `apps/main/train.py` and
 `lingua/stool.py` (account / QoS / partition, GPUs per node). Kernels follow the GPU at runtime: FlashAttention 4
-only on Blackwell (sm_100+) with `LINGUA_FA4_SITE` importable, else flash-attn 2.
+only on Blackwell (sm_100+) with `LINGUA_FA4_SITE` importable, FlashAttention 3 only on Hopper (sm_90) with
+`LINGUA_FA3_SITE` importable (`bin/build_fa3_h100.sh`), else flash-attn 2.
 
 Paths after the profile:
 

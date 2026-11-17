@@ -40,6 +40,8 @@ export OLMES_CONDA_ENV="${OLMES_CONDA_ENV:-${PRETRAIN_ROOT}/olmes/.venv-lmeval}"
 # process adds this directory to its sys.path). Set by the cluster profile where FA4 is installed (Blackwell);
 # unset, not importable, or a pre-Blackwell GPU -> training uses flash-attn 2.
 export LINGUA_FA4_SITE="${LINGUA_FA4_SITE:-}"
+# Same for FlashAttention 3 on Hopper (lingua/fa3_attention.py, built by bin/build_fa3_h100.sh).
+export LINGUA_FA3_SITE="${LINGUA_FA3_SITE:-}"
 
 # Wandb. Empty → user's default entity.
 export WANDB_ENTITY="${WANDB_ENTITY:-}"

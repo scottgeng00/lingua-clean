@@ -16,6 +16,7 @@ from torch.nn.attention.flex_attention import (
 
 from lingua import probe
 from lingua.fa4_attention import fa4_varlen_causal_attention
+from lingua.fa3_attention import fa3_varlen_causal_attention
 import pdb
 
 # Try to import flash attention for varlen support
@@ -411,8 +412,8 @@ class Attention(nn.Module):
         tok_idx: Optional[torch.Tensor] = None,
         mask: Optional[Union[BlockMask, AttentionBias, str]] = None,
         attn_impl: str = "sdpa",
-        cu_seqlens: Optional[torch.Tensor] = None,  # For FA2 / FA4 varlen: cumulative sequence lengths
-        max_seqlen: Optional[int] = None,  # For FA2 varlen: max sequence length in batch
+        cu_seqlens: Optional[torch.Tensor] = None,  # For FA2 / FA3 / FA4 varlen: cumulative sequence lengths
+        max_seqlen: Optional[int] = None,  # For FA2 / FA3 varlen: max sequence length in batch
     ) -> torch.Tensor:
         # B S D
         bsz, seq_len, dim = x.shape
@@ -452,6 +453,17 @@ class Attention(nn.Module):
                 xk.reshape(total_tokens, self.n_heads, self.head_dim),
                 xv.reshape(total_tokens, self.n_heads, self.head_dim),
                 cu_seqlens,
+            ).view(bsz, seq_len, self.n_heads, self.head_dim)
+
+        elif attn_impl == "fa3_varlen":
+            # Same semantics as the fa2_varlen branch below, FlashAttention 3 kernels (lingua/fa3_attention.py)
+            total_tokens = bsz * seq_len
+            output = fa3_varlen_causal_attention(
+                xq.reshape(total_tokens, self.n_heads, self.head_dim),
+                xk.reshape(total_tokens, self.n_heads, self.head_dim),
+                xv.reshape(total_tokens, self.n_heads, self.head_dim),
+                cu_seqlens,
+                max_seqlen or seq_len,
             ).view(bsz, seq_len, self.n_heads, self.head_dim)
 
         elif attn_impl == "fa2_varlen" and HAS_FLASH_ATTN and cu_seqlens is not None:

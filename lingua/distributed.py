@@ -79,6 +79,8 @@ class DistributedArgs:
     # Document-masked attention via FlashAttention 4 (lingua.fa4_attention) when it is importable, else flash-attn 2.
     # ~2.3x faster attention than flash-attn 2 on GB300.
     fa4_varlen_attn: bool = True
+    # Otherwise FlashAttention 3 (lingua.fa3_attention, Hopper) when $LINGUA_FA3_SITE is importable, else flash-attn 2.
+    fa3_varlen_attn: bool = True
     # torch.compile: benchmark block sizes for every generated kernel (the default heuristics leave the norm / RoPE
     # backward reductions well below memory bandwidth on GB300). +1.6% (w512) / +2.4% (w768) tokens/s; compile takes
     # 5-15 s longer when the node's compile caches are cold.

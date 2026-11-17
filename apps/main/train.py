@@ -38,6 +38,7 @@ from lingua.data import (
 from lingua.token_stream import MixedTokenStream, PinnedPrefetcher, TokenStream, init_token_stream_state, token_stream_batches
 from lingua.cluster import detect as cluster_detect
 from lingua.fa4_attention import fa4_available
+from lingua.fa3_attention import fa3_available
 from lingua.online_data import (
     ExcessLossController,
     OnlineReweightingArgs,
@@ -2385,7 +2386,12 @@ def train(args: TrainArgs):
         head_dim = args.model.head_dim or args.model.dim // args.model.n_heads
         use_fa4_attn = (args.distributed.fa4_varlen_attn and getattr(args.data, 'disable_cross_doc_attn', False)
                         and head_dim % 8 == 0 and head_dim <= 128 and fa4_available())
-        logger.info(f"Document-masked attention: {'FlashAttention 4' if use_fa4_attn else 'flash-attn 2 (or SDPA)'}")
+        # The FA3 build (bin/build_fa3_h100.sh) only has head_dim 128 kernels.
+        use_fa3_attn = (not use_fa4_attn and args.distributed.fa3_varlen_attn
+                        and getattr(args.data, 'disable_cross_doc_attn', False) and head_dim == 128
+                        and fa3_available())
+        logger.info(f"Document-masked attention: "
+                    f"{'FlashAttention 4' if use_fa4_attn else 'FlashAttention 3' if use_fa3_attn else 'flash-attn 2 (or SDPA)'}")
 
         gpu_memory_monitor = GPUMemoryMonitor("cuda")
         logger.info(
@@ -7061,7 +7067,8 @@ def train(args: TrainArgs):
                     torch._dynamo.maybe_mark_dynamic(cu_seqlens_tensor, 0)
                 loss = model(input_ids, labels,
                              cu_seqlens=cu_seqlens_tensor, max_seqlen=max_seqlen,
-                             fused_ce=args.distributed.fused_linear_ce, fa4_attn=use_fa4_attn)
+                             fused_ce=args.distributed.fused_linear_ce, fa4_attn=use_fa4_attn,
+                             fa3_attn=use_fa3_attn)
             if args.grad_acc_steps > 1:
                 model.set_requires_gradient_sync(train_state.acc_step == 0)
 
