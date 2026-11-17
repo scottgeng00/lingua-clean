@@ -2,7 +2,7 @@
 --reps random samples of --n documents (each document = its first chunk's embedding). With L2-normalized rows X,
 VS = exp(H(eigenvalues of X^T X / n)), the same spectrum as the n x n kernel K / n.
 
-    .venv-kd/bin/python scripts/embed/vendi.py --emb /checkpoint/mnm/sgeng/pretrain/embeddings --n 1024 --reps 50
+    .venv-kd/bin/python scripts/embed/vendi.py --emb /home/sgeng/scottg/pretrain/embeddings --n 1024 --reps 50
 """
 import argparse
 import glob

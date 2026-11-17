@@ -1,6 +1,6 @@
 """DCLM quality score (mlfoundations/fasttext-oh-eli5: P(__label__hq), text joined into one line as in DCLM) for the
 documents of one shard of a pre-tokenized stream (same doc ranges as embed_tokens.py). CPU only; runs in the
-fastText venv (/checkpoint/mnm/sgeng/pretrain/venvs/quality: fasttext, numpy<2, tokenizers). Output:
+fastText venv (/home/sgeng/scottg/pretrain/venvs/quality: fasttext, numpy<2, tokenizers). Output:
 OUT/shard_XXXX.dclm.npz with doc, dclm (float32).
 
     venvs/quality/bin/python scripts/embed/quality_dclm.py --stream DIR --out OUT --shard 3 --num-shards 40 [--docs N]

@@ -13,7 +13,7 @@ import numpy as np
 
 CORPORA = ["dclm_2x_w1152", "rw_gacha", "rw_direct"]
 LABEL = {"dclm_2x_w1152": "DCLM 2×", "rw_gacha": "rw_gacha", "rw_direct": "rw_direct"}
-SCORES = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments/jhe_pt17b/token_stream_scores.jsonl"
+SCORES = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/jhe_pt17b/token_stream_scores.jsonl"
 
 
 def stats(idx, sim, n_keys, ts=(0.7, 0.8)):

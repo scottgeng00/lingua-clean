@@ -14,7 +14,7 @@ import subprocess
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GROUP = "qwen3_ladder_dataconstrained"
 MANIFEST = f"{ROOT}/apps/main/configs/experiments/{GROUP}/manifest.json"
-RUNS = f"/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments/{GROUP}"
+RUNS = f"/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/{GROUP}"
 
 
 def last_step(d):

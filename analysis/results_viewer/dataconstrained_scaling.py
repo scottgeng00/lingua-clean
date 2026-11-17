@@ -33,7 +33,7 @@ POINTS = [(1, "d1x", 0.1, "unique 1x"), (1, "2x", 0.1, "unique 2x"), (2, "p4", 0
 COLORS = {"unique 1x": "#2a78d6", "unique 2x": "#eb6834", "repeat pass 4": "#1baf7a", "repeat pass 16": "#eda100"}
 MARKERS = {"unique 1x": "o", "unique 2x": "s", "repeat pass 4": "^", "repeat pass 16": "D"}
 INK, MUTED, GRID = "#1f1f1e", "#6b6a63", "#e6e5df"
-OUT = "/checkpoint/mnm/sgeng/pretrain/logs/reports/dataconstrained_scaling.png"
+OUT = "/home/sgeng/scottg/pretrain/logs/reports/dataconstrained_scaling.png"
 
 
 def grid(width, stage, pt, wd, metric="val_ce"):

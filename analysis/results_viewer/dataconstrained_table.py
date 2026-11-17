@@ -20,8 +20,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 GROUP = "qwen3_ladder_dataconstrained"
 MANIFEST = f"{ROOT}/apps/main/configs/experiments/{GROUP}/manifest.json"
-RUNS = f"/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments/{GROUP}"
-LOGS = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/slurm_logs"
+RUNS = f"/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/{GROUP}"
+LOGS = "/home/sgeng/scottg/pretrain/lingua-runs/runs/slurm_logs"
 COLS = ["run", "width", "stage", "learning_rate", "batch_sequences", "weight_decay", "embedding_decay", "eval_point",
         "tokens_seen", "steps", "val_ce", "val_bpb", "paloma_bpb", "train_loss", "skipped_steps", "seed"]
 

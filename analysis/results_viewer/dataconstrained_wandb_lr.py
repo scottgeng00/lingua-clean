@@ -27,7 +27,7 @@ INK, MUTED, GRID = "#1f1f1e", "#6b6a63", "#e6e5df"
 PANELS = [(1, "d1x", 0.1, "stage 1, 1x Chinchilla"), (1, "2x", 0.1, "stage 1, 2x Chinchilla"),
           (2, "p4", 0.3, "stage 2, pass 4"), (2, "p16", 0.3, "stage 2, pass 16")]
 LABEL = {"val_ce": "dclm_heldout val loss (nats/token)", "paloma": "Paloma BPB (mean of 16)"}
-OUT = "/checkpoint/mnm/sgeng/pretrain/logs/reports/dataconstrained_lr_w{}.png"
+OUT = "/home/sgeng/scottg/pretrain/logs/reports/dataconstrained_lr_w{}.png"
 
 
 def points(width, stage, pt, wd, metric):

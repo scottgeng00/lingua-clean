@@ -30,7 +30,7 @@ WIDTHS = [512, 768, 1152]
 COLORS = {512: "#2a78d6", 768: "#eb6834", 1152: "#1baf7a"}
 INK, MUTED, GRID = "#1f1f1e", "#6b6a63", "#e6e5df"
 LABEL = {"val_ce": "dclm_heldout val loss (nats/token)", "paloma": "Paloma BPB (mean of 16)"}
-OUT = "/checkpoint/mnm/sgeng/pretrain/logs/reports/dataconstrained_compute_{}" + ("_unique" if UNIQUE_ONLY else "") + ".png"
+OUT = "/home/sgeng/scottg/pretrain/logs/reports/dataconstrained_compute_{}" + ("_unique" if UNIQUE_ONLY else "") + ".png"
 
 
 def is_unique(e):

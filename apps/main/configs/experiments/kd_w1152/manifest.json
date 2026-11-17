@@ -24,7 +24,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "b_kd0p3": {
   "name": "b_kd0p3",
@@ -38,7 +38,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "b_kd0p5": {
   "name": "b_kd0p5",
@@ -52,7 +52,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "b_kd0p7": {
   "name": "b_kd0p7",
@@ -66,7 +66,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "b_kd0p9": {
   "name": "b_kd0p9",
@@ -80,7 +80,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "c_kd0p7_rw_gacha_r0p2": {
   "name": "c_kd0p7_rw_gacha_r0p2",
@@ -94,7 +94,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "c_kd0p7_rw_gacha_r0p4": {
   "name": "c_kd0p7_rw_gacha_r0p4",
@@ -108,7 +108,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "c_kd0p7_rw_direct_r0p2": {
   "name": "c_kd0p7_rw_direct_r0p2",
@@ -122,7 +122,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "c_kd0p7_rw_direct_r0p4": {
   "name": "c_kd0p7_rw_direct_r0p4",
@@ -136,7 +136,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "c_kd0p9_rw_gacha_r0p2": {
   "name": "c_kd0p9_rw_gacha_r0p2",
@@ -150,7 +150,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "c_kd0p9_rw_gacha_r0p4": {
   "name": "c_kd0p9_rw_gacha_r0p4",
@@ -164,7 +164,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "c_kd0p9_rw_direct_r0p2": {
   "name": "c_kd0p9_rw_direct_r0p2",
@@ -178,7 +178,7 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  },
  "c_kd0p9_rw_direct_r0p4": {
   "name": "c_kd0p9_rw_direct_r0p4",
@@ -192,6 +192,6 @@
   "lr": 0.0021,
   "bs": 256,
   "wd": 0.1,
-  "qos": "g3_mnm_high"
+  "qos": "high"
  }
 }

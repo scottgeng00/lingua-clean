@@ -33,9 +33,11 @@ class StoolArgs:
     constraint: str = ""  # The constraint on the nodes.
     exclude: str = ""  # The nodes to exclude.
     time: int = -1  # The time limit of the job (in minutes).
-    account: str = "zlab"
+    # Empty: taken from the environment (scripts/env.sh sets SLURM_* from the cluster profile, lingua/cluster.py);
+    # still empty -> the flag is omitted and the site default applies.
+    account: str = ""
     qos: str = ""
-    partition: str = "gpu-h200"
+    partition: str = ""
     stdout: bool = False
     dump_dir: str = ""
 
@@ -51,7 +53,7 @@ SBATCH_COMMAND = """#!/bin/bash
 #SBATCH --gres=gpu:{ngpus}
 #SBATCH --cpus-per-gpu={ncpu}
 #SBATCH --time={time}
-#SBATCH --partition={partition}
+{partition}
 #SBATCH --mem={mem}
 
 #SBATCH --output={dump_dir}/logs/%j/%j.stdout
@@ -122,6 +124,10 @@ def retrieve_max_time_per_partition() -> Dict[str, int]:
 
 
 def validate_args(args) -> None:
+    args.account = args.account or os.environ.get("SLURM_ACCOUNT", "")
+    args.qos = args.qos or os.environ.get("SLURM_QOS", "")
+    args.partition = args.partition or os.environ.get("SLURM_PARTITION", "")
+
     # Set maximum time limit if not specified
     if args.time == -1:
         max_times = retrieve_max_time_per_partition()
@@ -141,6 +147,8 @@ def validate_args(args) -> None:
     if args.qos:
         args.qos = f"#SBATCH --qos={args.qos}"
 
+    args.partition = f"#SBATCH --partition={args.partition}" if args.partition else ""
+
     if getattr(args, "exclude", ""):
         args.exclude = f"#SBATCH --exclude={args.exclude}"
 
@@ -157,12 +165,10 @@ def validate_args(args) -> None:
 
     args.mem = args.mem or "0"
 
-    assert args.partition
     assert args.ngpu > 0
     assert args.ncpu > 0
     assert args.nodes > 0
     assert args.time > 0
-    assert args.partition
 
 
 _LAUNCHER_PREFIXES = ("SLURM_", "SLURMD_", "SBATCH_", "SRUN_", "PMIX_", "PMI_", "OMPI_", "TORCHELASTIC_", "NCCL_", "TORCH_NCCL_")

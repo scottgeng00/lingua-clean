@@ -12,7 +12,7 @@ from collections import defaultdict
 
 import numpy as np
 
-X = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments"
+X = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments"
 MODELS = {"2x": f"{X}/data_constrainedv2/w1152_u_bs256_lr2e-3_wd0p1_d2x",
           "4x": f"{X}/data_constrainedv2/w1152_u_bs256_lr2e-3_wd0p1",
           "ce": f"{X}/kd_w1152/b_ce", "kd": f"{X}/kd_w1152/b_kd0p5",

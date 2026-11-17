@@ -14,7 +14,7 @@ import glob
 import json
 import os
 
-ROOT = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments/gb300"
+ROOT = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/gb300"
 
 
 def load(run_dir):

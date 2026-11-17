@@ -19,7 +19,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-ROOT = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments/lrsweep"
+ROOT = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/lrsweep"
 FINAL = {64: 76294, 128: 38147, 256: 19073}
 NAME = re.compile(r"(dclm|fwedu)_bs(\d+)_lr([0-9p]+)e(\d+)(?:_seed(\d+))?$")
 COLORS = {64: "tab:blue", 128: "tab:orange", 256: "tab:green"}

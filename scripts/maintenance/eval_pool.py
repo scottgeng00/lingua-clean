@@ -10,7 +10,7 @@ Exits when there has been nothing to steal for --idle-exit minutes, or near the 
 """
 import argparse, os, subprocess, threading, time
 
-REPO = "/checkpoint/mnm/sgeng/pretrain/lingua-clean"
+REPO = "/home/sgeng/scottg/pretrain/lingua-clean"
 lock = threading.Lock()
 
 

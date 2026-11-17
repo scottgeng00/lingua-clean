@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
 from scripts.weborg.load import load
 M = "/home/sgeng/scottg/pretrain/assets/models"
-D = "/checkpoint/mnm/sgeng/pretrain/embeddings/rewrite_pairs"
+D = "/home/sgeng/scottg/pretrain/embeddings/rewrite_pairs"
 rows = [json.loads(l) for l in open(f"{D}/pairs.jsonl")]
 out = {"source_id": np.array([r["source_id"] for r in rows])}
 tok, topic = load(f"{M}/TopicClassifier-NoURL")

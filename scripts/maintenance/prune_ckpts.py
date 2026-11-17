@@ -7,10 +7,10 @@ A run is finished when its final eval (evals/<steps>/validation.json) exists. Fo
 Unfinished runs are not touched. Usage: prune_ckpts.py [--apply]
 """
 import json, os, shutil, sys
-RUNS = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments"
-GROUPS = {"data_constrainedv2": "/checkpoint/mnm/sgeng/pretrain/lingua-clean",
-          "qwen3_ladder_dataconstrained": "/checkpoint/mnm/sgeng/pretrain/lingua-clean",
-          "completep_ladder": "/checkpoint/mnm/sgeng/pretrain/lingua-clean-completep"}
+RUNS = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments"
+GROUPS = {"data_constrainedv2": "/home/sgeng/scottg/pretrain/lingua-clean",
+          "qwen3_ladder_dataconstrained": "/home/sgeng/scottg/pretrain/lingua-clean",
+          "completep_ladder": "/home/sgeng/scottg/pretrain/lingua-clean-completep"}
 apply = "--apply" in sys.argv
 
 def size(p):
@@ -23,7 +23,7 @@ def size(p):
     return t
 
 def expand(p):
-    return p.replace("${oc.env:MIDTRAIN_ROOT}", "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain")
+    return p.replace("${oc.env:MIDTRAIN_ROOT}", "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain")
 
 tot = 0; nrun = 0; skipped = 0
 for g, root in GROUPS.items():

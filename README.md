@@ -102,10 +102,10 @@ lingua-clean/
    analysis path loads HF format via `AutoModelForCausalLM.from_pretrained`.
    `scripts/fetch_models.sh` populates both layouts in one shot.
 
-   Optional cluster-specific knobs in `scripts/env.sh` (unset by default,
-   slurm uses site defaults if you leave them empty):
-   - `SLURM_ACCOUNT`, `SLURM_QOS`, `SLURM_PARTITION` — appended to the
-     `launch_midtrain.sh` sbatch command if non-empty.
+   Slurm account / partition / QoS and node shape come from the detected
+   cluster profile (`lingua/cluster.py`; see "Per-cluster configuration"
+   below). Export `SLURM_ACCOUNT`, `SLURM_QOS`, `SLURM_PARTITION` before
+   sourcing to override them.
    - `WANDB_ENTITY` — wandb entity for all runs (leave empty to use your
      personal default).
 
@@ -200,30 +200,48 @@ serves for both training and evals (`scripts/env.sh` defaults `LINGUA_VENV` to i
 > (`/home/sgeng/scottg/pretrain/olmes`, a clone of `allenai/olmes` plus a few commits). Push it to
 > a remote you can reach from the new cluster before setting up there.
 
-## 2. Per-cluster configuration (`scripts/env.sh`)
+## 2. Per-cluster configuration (`lingua/cluster.py`, `scripts/env.sh`)
 
-`scripts/env.sh` is sourced by every launcher. On a new cluster, edit (or export before sourcing):
+`scripts/env.sh` is sourced by every launcher. It first loads the cluster profile from `lingua/cluster.py`,
+detected from Slurm's `ClusterName` (else the GPU type in `sinfo`'s GRES; `LINGUA_CLUSTER=<profile>` forces one;
+`python3 lingua/cluster.py` prints the detected profile):
 
-| Variable | Meaning | Current value here |
+| Profile | Cluster | Nodes | Account / partition | Default QoS | High QoS |
+|---|---|---|---|---|---|
+| `gb300-dalton` | `fair-cw-use2-3` (Dalton) | 4x GB300, aarch64 | `mnm` / `g3` | `g3_comm_shared` | `g3_mnm_high` |
+| `h100-dm1` | `fair-cw-use1-1` (DM1) | 8x H100, x86_64 | `dream` / `h100_mdf` | `h100_mdf_lowest` | `h100_mdf_explore` |
+| `h200` | original H200 cluster (unverified) | 8x H200, x86_64 | `dream` / `gpu-h200` | `h200_dream_high` | same |
+
+The profile exports `SLURM_ACCOUNT`, `SLURM_PARTITION`, `SLURM_QOS`, `SLURM_HIGH_QOS`, `SLURM_EXCLUDE`,
+`GPUS_PER_NODE`, `CPUS_PER_NODE` / `MEM_PER_NODE` (= per-GPU request x GPUs per node), `PRETRAIN_ROOT` and
+cluster-only paths (`LINGUA_FA4_SITE` on Dalton). It also sets `SBATCH_ACCOUNT` / `SBATCH_PARTITION` /
+`SBATCH_QOS`, so standalone `.sbatch` files carry no cluster-specific `#SBATCH` lines (pass `-q "$SLURM_HIGH_QOS"`
+for high priority). Any variable you export before sourcing wins. To add a cluster, add a `Cluster(...)` to
+`lingua/cluster.py`.
+
+Consumers: `scripts/launch_pretrain.sh` (node shape), `scripts/dataconstrained_orchestrate.py` (nodes = GPUs /
+GPUs per node; a manifest `"qos": "high"` means the profile's high QoS), async evals in `apps/main/train.py` and
+`lingua/stool.py` (account / QoS / partition, GPUs per node). Kernels follow the GPU at runtime: FlashAttention 4
+only on Blackwell (sm_100+) with `LINGUA_FA4_SITE` importable, else flash-attn 2.
+
+Paths after the profile:
+
+| Variable | Meaning | Default |
 |---|---|---|
-| `CACHE_DIR` | root for all run outputs (hard-coded here; restore the commented `${HOME}/lingua-clean-sandbox` default or set your own) | `/checkpoint/dream-sc-3/scottg/pretrain/lingua-runs` |
+| `PRETRAIN_ROOT` | storage root; `~/scottg/pretrain` must point at it on every cluster | `/home/sgeng/scottg/pretrain` |
+| `CACHE_DIR` | root for all run outputs | `${PRETRAIN_ROOT}/lingua-runs` |
 | `MIDTRAIN_ROOT` | run dirs (`dump_dir: ${oc.env:MIDTRAIN_ROOT}/...` in configs) | `${CACHE_DIR}/runs/midtrain` |
 | `EVAL_ROOT` | async-eval slurm logs (`eval.dump_dir`) | `${CACHE_DIR}/runs/evals` |
 | `SLURM_LOG_DIR` | training slurm logs | `${CACHE_DIR}/runs/slurm_logs` |
-| `DATA_ROOT` | root of the **validation** sets (`eval.validation.root_dir: ${oc.env:DATA_ROOT}`) | `.../assets/data/dolmino_splits` |
-| `LINGUA_VENV` | training venv (override per launch with `.venv-kd`) | `<repo>/.venv` |
-| `OLMES_CONDA_ENV` | OLMES env (venv or conda) | `/home/sgeng/scottg/pretrain/olmes/.venv-lmeval` |
-| `SLURM_ACCOUNT`, `SLURM_QOS`, `SLURM_PARTITION` | appended to sbatch if non-empty | `dream`, `h200_dream_high`, unset |
+| `DATA_ROOT` | root of the **validation** sets (`eval.validation.root_dir: ${oc.env:DATA_ROOT}`) | `${PRETRAIN_ROOT}/assets/data/dolmino_splits` |
+| `LINGUA_VENV` | training venv (built per architecture by `bin/install_kd_requirements.sh`) | `<repo>/.venv-kd` |
+| `OLMES_CONDA_ENV` | OLMES env (venv or conda) | `${PRETRAIN_ROOT}/olmes/.venv-lmeval` |
 | `WANDB_ENTITY` | wandb entity (empty = your default) | empty |
 | `TEACHER_*`, `STUDENT_*`, `TOKENIZER_PATH` | KD mid-training only; unused by from-scratch pretraining | |
 
-The launcher (`scripts/launch_pretrain.sh`) also hard-codes the node shape: `--gres=gpu:8
---cpus-per-task=64 --mem=456G --time=122:00:00`. Adjust for the new cluster's nodes.
-
-**Absolute paths inside configs.** The genscale configs hard-code `data.root_dir`
-(`/home/sgeng/scottg/pretrain/assets/data`), `data.tokenizer.path` and `eval.olmes.tokenizer_path`
-(`/home/sgeng/scottg/pretrain/assets/models/Qwen3.5-2B-tokenizer-eot`). Either recreate that
-`assets/` layout on the new cluster (simplest: a symlink) or `sed` the configs.
+**Absolute paths inside configs and scripts** use `/home/sgeng/scottg/pretrain/...`. On Dalton
+`/home/sgeng/scottg -> /checkpoint/mnm/sgeng`; on a new cluster create the same link to that cluster's storage
+(e.g. on DM1 `ln -s /checkpoint/dream/sgeng ~/scottg`) and copy `assets/` there.
 
 wandb credentials come from `~/.netrc` (the host in `~/.config/wandb/settings`); see
 `scripts/_sbatch_inner.sh` for `WANDB_USE_ENV_KEY` / `WANDB_MODE`.

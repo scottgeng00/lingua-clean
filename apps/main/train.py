@@ -36,6 +36,7 @@ from lingua.data import (
     init_dataloader_state_from_args,
 )
 from lingua.token_stream import MixedTokenStream, PinnedPrefetcher, TokenStream, init_token_stream_state, token_stream_batches
+from lingua.cluster import detect as cluster_detect
 from lingua.fa4_attention import fa4_available
 from lingua.online_data import (
     ExcessLossController,
@@ -2384,8 +2385,7 @@ def train(args: TrainArgs):
         head_dim = args.model.head_dim or args.model.dim // args.model.n_heads
         use_fa4_attn = (args.distributed.fa4_varlen_attn and getattr(args.data, 'disable_cross_doc_attn', False)
                         and head_dim % 8 == 0 and head_dim <= 128 and fa4_available())
-        if use_fa4_attn:
-            logger.info("Document-masked attention: FlashAttention 4")
+        logger.info(f"Document-masked attention: {'FlashAttention 4' if use_fa4_attn else 'flash-attn 2 (or SDPA)'}")
 
         gpu_memory_monitor = GPUMemoryMonitor("cuda")
         logger.info(
@@ -7579,18 +7579,20 @@ def train(args: TrainArgs):
                     assert args.async_eval_gpus > 0
                     logger.info(f"Launching {eval_backend} evals on {args.async_eval_gpus} gpus")
                     # Read before clean_env(), which strips every SLURM_* variable.
-                    eval_account = os.environ.get("SLURM_ACCOUNT", "dream")
-                    eval_qos = os.environ.get("SLURM_QOS", "h200_dream_high")
-                    # Run evals on the training job's partition (StoolArgs defaults to gpu-h200).
-                    eval_partition = os.environ.get("SLURM_JOB_PARTITION", StoolArgs.partition)
+                    # Same account / QoS / partition as the training job (scripts/env.sh sets them from the cluster
+                    # profile, lingua/cluster.py); GPUs per node from the profile too.
+                    eval_cluster = cluster_detect()
+                    eval_account = os.environ.get("SLURM_ACCOUNT") or eval_cluster.account
+                    eval_qos = os.environ.get("SLURM_QOS") or eval_cluster.qos
+                    eval_partition = os.environ.get("SLURM_JOB_PARTITION") or eval_cluster.partition
                     with clean_env():
                         launch_job(
                             StoolArgs(
                                 asdict(eval_args),
                                 script=_script,
                                 copy_code=False,
-                                nodes=max(1, args.async_eval_gpus // 8),
-                                ngpu=args.async_eval_gpus,
+                                nodes=max(1, args.async_eval_gpus // eval_cluster.gpus_per_node),
+                                ngpu=min(args.async_eval_gpus, eval_cluster.gpus_per_node),  # per node
                                 time=480,
                                 mem="200GB",
                                 account=eval_account,

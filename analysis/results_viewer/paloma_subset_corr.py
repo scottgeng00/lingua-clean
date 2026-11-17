@@ -23,7 +23,7 @@ import numpy as np
 from dataconstrained_lr_v2 import ROOT, RUNS
 from olmes_vs_val import QA
 
-X = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments"
+X = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments"
 SOURCES = ["4chan_meta_sep", "c4_100_domains", "c4_en", "dolma-v1_5", "dolma_100_programing_languages",
            "dolma_100_subreddits", "falcon-refinedweb", "gab", "m2d2_s2orc_unsplit", "m2d2_wikipedia_unsplit",
            "manosphere_meta_sep", "mc4", "ptb", "redpajama", "twitterAAE_HELM_fixed", "wikitext_103"]

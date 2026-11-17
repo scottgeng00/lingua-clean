@@ -66,10 +66,12 @@ cat > "$SITE/sitecustomize.py" <<'PY'
 # Written by bin/install_kd_requirements.sh: xformers 0.0.32 pins flash-attn <= 2.8.2,
 # but the torch 2.8 wheel is 2.8.3 (lingua uses flash-attn directly, xformers only for op lists).
 import os
+import platform
 os.environ.setdefault("XFORMERS_IGNORE_FLASH_VERSION_CHECK", "1")
-# Triton 3.4 bundles a CUDA 12.8 ptxas that rejects GB300 (sm_103a); use CUDA 12.9's.
-_PTXAS = "/checkpoint/mnm/sgeng/pretrain/cuda-12.9/bin/ptxas"
-if os.path.exists(_PTXAS):
+# Triton 3.4 bundles a CUDA 12.8 ptxas that rejects GB300 (sm_103a); use CUDA 12.9's (an aarch64 build: only on
+# aarch64, so a copied asset tree cannot break x86 clusters).
+_PTXAS = "/home/sgeng/scottg/pretrain/cuda-12.9/bin/ptxas"
+if platform.machine() == "aarch64" and os.path.exists(_PTXAS):
     os.environ.setdefault("TRITON_PTXAS_PATH", _PTXAS)
 PY
 

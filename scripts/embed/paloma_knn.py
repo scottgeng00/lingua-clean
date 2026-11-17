@@ -4,7 +4,7 @@ smallest corpus (size-matched, seed 0), since the best-match similarity grows wi
 Output: OUT/knn.npz with, per (corpus, variant): top-K similarities [n_paloma_chunks, K] and neighbour chunk indices;
 plus the Paloma chunk source names and doc ids.
 
-    .venv-kd/bin/python scripts/embed/paloma_knn.py --emb /checkpoint/mnm/sgeng/pretrain/embeddings \
+    .venv-kd/bin/python scripts/embed/paloma_knn.py --emb /home/sgeng/scottg/pretrain/embeddings \
         --corpora dclm_2x_w1152 rw_gacha rw_direct --out .../embeddings/analysis
 """
 import argparse

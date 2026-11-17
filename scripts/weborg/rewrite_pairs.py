@@ -6,7 +6,7 @@ source / gacha / direct text per source id.
 import json, re, sys
 G = "/checkpoint/comem-sage/jacquelinehe/pretrain_data/gacha_merged"
 P = "/checkpoint/comem-sage/jacquelinehe/pretrain_data/gacha_pilot/rewrite_big2"
-OUT = "/checkpoint/mnm/sgeng/pretrain/embeddings/rewrite_pairs/pairs.jsonl"
+OUT = "/home/sgeng/scottg/pretrain/embeddings/rewrite_pairs/pairs.jsonl"
 N_LINES = int(sys.argv[1]) if len(sys.argv) > 1 else 400_000
 pat = re.compile(r"rewrite_big2/runs/(?:gacha_nothink|direct)/(?:gacha|direct)-t(\d+)/(\d)")
 arms = {}

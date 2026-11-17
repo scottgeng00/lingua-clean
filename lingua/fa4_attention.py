@@ -28,6 +28,10 @@ _fa4 = None  # fa4.interface once imported, False if it does not import
 
 def fa4_available() -> bool:
     global _fa4
+    if _fa4 is None and torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 10:
+        # FA4's CuTe DSL kernels target Blackwell (sm_100+); H100/H200 keep flash-attn 2.
+        logger.info(f"FlashAttention 4 skipped on {torch.cuda.get_device_name()} (needs sm_100+); using flash-attn 2")
+        _fa4 = False
     if _fa4 is None:
         site = os.environ.get("LINGUA_FA4_SITE")
         if site:

@@ -4,7 +4,7 @@ import json, re
 import numpy as np
 import torch
 from scripts.weborg.load import load
-M = "/home/sgeng/scottg/pretrain/assets/models"; D = "/checkpoint/mnm/sgeng/pretrain/embeddings/rewrite_pairs"
+M = "/home/sgeng/scottg/pretrain/assets/models"; D = "/home/sgeng/scottg/pretrain/embeddings/rewrite_pairs"
 rows = [json.loads(l) for l in open(f"{D}/pairs.jsonl")]
 z = np.load(f"{D}/pairs_labels.npz")
 def strip_md(t):

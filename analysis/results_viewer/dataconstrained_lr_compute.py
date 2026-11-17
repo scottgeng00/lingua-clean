@@ -30,7 +30,7 @@ WD = 0.1
 COLORS = {512: "#2a78d6", 768: "#eb6834", 1152: "#1baf7a"}
 INK, MUTED, GRID = "#1f1f1e", "#6b6a63", "#e6e5df"
 FIT, FIT2 = "#c0392b", "#8a4fd0"
-OUT = "/checkpoint/mnm/sgeng/pretrain/logs/reports/dataconstrained_lr_scaling.png"
+OUT = "/home/sgeng/scottg/pretrain/logs/reports/dataconstrained_lr_scaling.png"
 LR_TICKS = [1e-3, 1.5e-3, 2e-3, 3e-3, 4e-3, 6e-3]
 
 

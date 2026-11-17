@@ -10,7 +10,7 @@ import json
 import os
 import re
 
-R = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments"
+R = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments"
 FINAL = {64: 76294, 128: 38147, 256: 19073}
 
 

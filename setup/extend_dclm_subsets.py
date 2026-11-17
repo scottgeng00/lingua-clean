@@ -31,7 +31,7 @@ import numpy as np
 import orjson
 
 DATA = "/home/sgeng/scottg/pretrain/assets/data/dclm_subsets"
-WORK = "/checkpoint/mnm/sgeng/pretrain/tmp_dclm_extend"
+WORK = "/home/sgeng/scottg/pretrain/tmp_dclm_extend"
 REPO = "allenai/dolmino-mix-1124"
 EXISTING = ["dclm_8m_0", "dclm_8m_1", "dclm_8m_2", "dclm_8m_3"]
 HELDOUT = f"{DATA}/dclm_heldout/dclm_heldout.val.jsonl"

@@ -20,7 +20,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 GROUP = "data_constrainedv2"
-RUNS = f"/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments/{GROUP}"
+RUNS = f"/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/{GROUP}"
 WIDTHS = [512, 768, 1152, 1536]
 MULTS = [1, 2, 4, 8]
 COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]  # categorical slots 1-4 (validated); markers add redundancy

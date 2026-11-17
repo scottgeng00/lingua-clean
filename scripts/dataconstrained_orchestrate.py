@@ -13,11 +13,15 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+from lingua.cluster import detect  # noqa: E402
+
 GROUP = "qwen3_ladder_dataconstrained"  # or data_constrainedv2 (--group)
-COUNTS = "/checkpoint/mnm/sgeng/pretrain/logs/dataconstrained/launches"
-EXCLUDE = "g3-144-119"
+COUNTS = "/home/sgeng/scottg/pretrain/logs/dataconstrained/launches"
+CLUSTER = detect()
 
 
 def ckpt_done(path):
@@ -25,16 +29,21 @@ def ckpt_done(path):
 
 
 def resolve(p):
-    return p.replace("${oc.env:MIDTRAIN_ROOT}", "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain")
+    return p.replace("${oc.env:MIDTRAIN_ROOT}", "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain")
 
 
 def launch(entry, dry, group):
-    gpus = entry["gpus"]
-    per_node = min(gpus, 4)
+    """Submit one run, sized for this cluster (lingua/cluster.py). Manifest `qos`: omitted = the profile's default
+    QoS, "high" = its high-priority QoS, anything else = that QoS verbatim."""
+    c, gpus = CLUSTER, entry["gpus"]
+    per_node = min(gpus, c.gpus_per_node)
+    qos = entry.get("qos") or c.qos
+    qos = c.high_qos if qos == "high" else qos
     env = {k: v for k, v in os.environ.items() if k.lower() not in ("http_proxy", "https_proxy")}
-    env.update(CONFIG=f"experiments/{group}/{entry['name']}", NNODES=str(-(-gpus // 4)), GPUS_PER_NODE=str(per_node),
-               CPUS_PER_NODE=str(32 * per_node), MEM_PER_NODE=f"{180 * per_node}G", STEPS_OVERRIDE=str(entry["steps"]),
-               TIME_LIMIT="3-00:00:00", SLURM_EXCLUDE=EXCLUDE, SLURM_QOS=entry.get("qos", "g3_comm_shared"))
+    env.update(CONFIG=f"experiments/{group}/{entry['name']}", NNODES=str(-(-gpus // per_node)),
+               GPUS_PER_NODE=str(per_node), CPUS_PER_NODE=str(c.cpus_per_gpu * per_node),
+               MEM_PER_NODE=f"{c.mem_per_gpu_gb * per_node}G", STEPS_OVERRIDE=str(entry["steps"]),
+               TIME_LIMIT="3-00:00:00", SLURM_EXCLUDE=c.exclude, SLURM_QOS=qos, SBATCH_QOS=qos)
     if dry:
         return "dry-run"
     cmd = f"cd {ROOT} && source scripts/env.sh >/dev/null && bash scripts/launch_pretrain.sh"
@@ -60,7 +69,7 @@ def main():
     ap.add_argument("--group", default=GROUP)
     a = ap.parse_args()
     manifest = json.load(open(f"{ROOT}/apps/main/configs/experiments/{a.group}/manifest.json"))
-    runs = f"/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments/{a.group}"
+    runs = f"/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/{a.group}"
     active = set(subprocess.run(["squeue", "-u", os.environ["USER"], "-h", "-o", "%j"], capture_output=True,
                                 text=True).stdout.split())
     os.makedirs(COUNTS, exist_ok=True)

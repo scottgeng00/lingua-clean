@@ -11,7 +11,7 @@ import json
 import os
 import re
 
-ROOT = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments/lrsweep"
+ROOT = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/lrsweep"
 NAME = re.compile(r"(dclm|fwedu)_bs(\d+)_lr([0-9p]+)e(\d+)(?:_seed(\d+))?$")
 
 

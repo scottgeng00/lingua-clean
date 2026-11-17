@@ -15,9 +15,9 @@ from multiprocessing import Pool
 
 import torch
 
-RUNS = "/checkpoint/mnm/sgeng/pretrain/lingua-runs/runs/midtrain/experiments"
-GROUPS = {"data_constrainedv2": "/checkpoint/mnm/sgeng/pretrain/lingua-clean",
-          "completep_ladder": "/checkpoint/mnm/sgeng/pretrain/lingua-clean-completep"}
+RUNS = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments"
+GROUPS = {"data_constrainedv2": "/home/sgeng/scottg/pretrain/lingua-clean",
+          "completep_ladder": "/home/sgeng/scottg/pretrain/lingua-clean-completep"}
 
 
 def val_ce(path):

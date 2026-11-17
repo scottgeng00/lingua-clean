@@ -9,7 +9,7 @@ per-source dice seed (--seed-base + n; hers were 10M+ and 60M+) and thinking-off
 source line (_ref); the simplescale handlers gacha:rewrite_doc / gacha:rewrite_doc_direct cap the text at
 6,000 chars and build her prompt. source_file / source_line locate each source for alignment.
 
-    .venv-kd/bin/python setup/build_gacha_rewrite_manifests.py --out /checkpoint/mnm/sgeng/pretrain/simplescale_runs/gacha_dclm8m_01/manifest
+    .venv-kd/bin/python setup/build_gacha_rewrite_manifests.py --out /home/sgeng/scottg/pretrain/simplescale_runs/gacha_dclm8m_01/manifest
 """
 
 import argparse

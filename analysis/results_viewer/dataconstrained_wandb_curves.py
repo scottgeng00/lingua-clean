@@ -24,7 +24,7 @@ FINALS = {512: "w512_s2final_bs64_lr6e-3_wd0p3", 768: "w768_s2final_bs64_lr2e-3_
 CONFIG = {512: "LR 6e-3, batch 64, wd 0.3", 768: "LR 2e-3, batch 64, wd 0.3", 1152: "LR 1.5e-3, batch 128, wd 0.3"}
 SERIES = {"seed 0": "#2a78d6", "seed 1": "#eb6834", "unique data (stage 1 best)": "#1baf7a"}
 INK, MUTED, GRID = "#1f1f1e", "#6b6a63", "#e6e5df"
-OUT = "/checkpoint/mnm/sgeng/pretrain/logs/reports/dataconstrained_repetition_curves.png"
+OUT = "/home/sgeng/scottg/pretrain/logs/reports/dataconstrained_repetition_curves.png"
 
 
 def curve(width, seed, metric):
