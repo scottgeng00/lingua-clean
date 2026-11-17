@@ -13,7 +13,7 @@ import os
 import subprocess
 import sys
 
-LC = "/checkpoint/dream-sc-3/scottg/pretrain/lingua-clean"
+LC = "/home/sgeng/scottg/pretrain/lingua-clean"
 CFG = f"{LC}/apps/main/configs/experiments/genscale"
 DATA = "/home/sgeng/scottg/pretrain/assets/data"
 WIKI0 = "dclm_rewrites/dclm_8m_1_qwen35_9b_wiki_g1_max4096"

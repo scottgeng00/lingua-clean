@@ -9,7 +9,7 @@ validation step of each run (19074 for finished runs).
 import json, math, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collect import collect_olmes
-G = "/checkpoint/dream-sc-3/scottg/pretrain/lingua-runs/runs/midtrain/experiments/genscale"
+G = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/genscale"
 OOD = ["math_shuffled", "flan_shuffled", "wiki_shuffled", "pes2o_shuffled", "stackexchange_shuffled"]
 ACC = [("sciq:rc::olmo3", "SciQ"), ("arc_easy:rc::olmes:full", "ARC-E"), ("piqa:rc::olmes:full", "PIQA"), ("mmlu:rc::olmes", "MMLU"), ("triviaqa::olmes", "TQA")]
 runs = sys.argv[1:]

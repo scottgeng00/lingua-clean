@@ -18,7 +18,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 DATA = "/home/sgeng/scottg/pretrain/assets/data/dclm_subsets"
-STAGING = "/checkpoint/dream-sc-3/scottg/pretrain/assets/hf_upload/dclm-8m"
+STAGING = "/home/sgeng/scottg/pretrain/assets/hf_upload/dclm-8m"
 REPO = "scottgeng00/dclm-8m"
 SPLITS = ["dclm_8m_0", "dclm_8m_1"]
 N_CHUNKS, ROWS_PER_SHARD = 16, 125_000

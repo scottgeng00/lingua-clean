@@ -13,7 +13,7 @@
 #   SUBSET=dclm_8m_1        subset under dclm_subsets/ to rewrite
 #   MODELS="2b 9b"          Qwen3.5 sizes (assets/models/Qwen3.5-<SIZE^^>)
 #   PROMPTS="wiki guided"   handlers in simplescale.harnesses.rewrite
-#   POOLS="h200_comm_shared=64"   space-separated QOS=COUNT worker pools
+#   POOLS="<bulk pool>=64"        space-separated QOS=COUNT worker pools (default: the cluster profile's bulk pool)
 #   TP=1                    GPUs per worker (2 is plenty for 27B at 16k context)
 #   MAX_NEW=4096 MAX_DOC=11000 CONTEXT=16384
 set -euo pipefail
@@ -21,7 +21,6 @@ set -euo pipefail
 SUBSET="${SUBSET:-dclm_8m_1}"
 MODELS="${MODELS:-2b 9b}"
 PROMPTS="${PROMPTS:-wiki guided}"
-POOLS="${POOLS:-h200_comm_shared=64}"
 MAX_NEW="${MAX_NEW:-4096}"
 MAX_DOC="${MAX_DOC:-11000}"
 CONTEXT="${CONTEXT:-16384}"
@@ -30,7 +29,10 @@ TP="${TP:-1}"
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA=/home/sgeng/scottg/pretrain/assets/data
 MODELS_DIR=/home/sgeng/scottg/pretrain/assets/models
-SS=/checkpoint/dream-sc-3/scottg/pretrain/simplescale
+SS="$(cd -- "${ROOT_DIR}/../simplescale" && pwd)"
+# Default worker pools follow the cluster profile (simplescale/clusters.py).
+DEFAULT_POOL="$("${SS}/.venv/bin/python" -c 'from simplescale.clusters import detect; print(detect().bulk_pool)')"
+POOLS="${POOLS:-${DEFAULT_POOL}=64}"
 MANIFEST="${SS}/runs/manifests/${SUBSET}.g1.max${MAX_NEW}.manifest.jsonl"
 
 if [ ! -f "${MANIFEST}" ]; then

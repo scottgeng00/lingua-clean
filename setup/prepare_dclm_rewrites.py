@@ -11,7 +11,7 @@ row is kept, so alignment holds; outputs that hit max_new_tokens or are empty ar
 dataset.json. Token counts come from a 1-in-200 sample.
 
     python setup/prepare_dclm_rewrites.py \
-        --run /checkpoint/dream-sc-3/scottg/pretrain/simplescale/runs/dclm_8m_1-qwen35-2b-wiki-g1 \
+        --run /home/sgeng/scottg/pretrain/simplescale/runs/dclm_8m_1-qwen35-2b-wiki-g1 \
         --subset /home/sgeng/scottg/pretrain/assets/data/dclm_subsets/dclm_8m_1 \
         --details qwen35_2b_wiki_g1_max4096
 """

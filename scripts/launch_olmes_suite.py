@@ -87,7 +87,7 @@ def main():
             continue
         launch_job(StoolArgs(asdict(args), script="apps.main.eval_olmes", copy_code=False, nodes=1, ngpu=1,
                              time=480, mem="200GB", account=os.environ["SLURM_ACCOUNT"], qos=os.environ["SLURM_QOS"],
-                             partition="g3", tasks_per_node=1, override=False, dirs_exists_ok=True,
+                             partition=os.environ.get("SLURM_PARTITION", ""), tasks_per_node=1, override=False, dirs_exists_ok=True,
                              anaconda=os.environ.get("LINGUA_EVAL_VENV") or os.environ.get("LINGUA_VENV", "default")))
         print(f"launched OLMES suite for {run} step {step} -> {args.dump_dir}")
 

@@ -33,7 +33,7 @@ def main():
     gpus = cfg["async_eval_gpus"]
     launch_job(StoolArgs(asdict(eval_args), script="apps.main.eval_olmes", copy_code=False,
                          nodes=max(1, gpus // 8), ngpu=gpus, time=480, mem="200GB",
-                         account=os.environ["SLURM_ACCOUNT"], qos=os.environ["SLURM_QOS"], partition="g3",
+                         account=os.environ["SLURM_ACCOUNT"], qos=os.environ["SLURM_QOS"], partition=os.environ.get("SLURM_PARTITION", ""),
                          tasks_per_node=1, override=False, dirs_exists_ok=True,
                          anaconda=os.environ.get("LINGUA_EVAL_VENV") or os.environ.get("LINGUA_VENV", "default")))
     print(f"launched eval for {cfg['dump_dir']} step {step} -> {eval_args.dump_dir}")

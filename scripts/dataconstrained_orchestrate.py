@@ -36,11 +36,16 @@ def launch(entry, dry, group):
     """Submit one run, sized for this cluster (lingua/cluster.py). Manifest `qos`: omitted = the profile's default
     QoS, "high" = its high-priority QoS, anything else = that QoS verbatim."""
     c, gpus = CLUSTER, entry["gpus"]
-    per_node = min(gpus, c.gpus_per_node)
+    # Spread the run evenly over the fewest nodes, so the DP world size (and thus the global batch) is exactly
+    # `gpus`: 12 GPUs is 3x4 on Dalton but 2x6 on 8-GPU nodes, not 2x8.
+    nnodes = -(-gpus // c.gpus_per_node)
+    per_node = gpus // nnodes
+    if per_node * nnodes != gpus:
+        return f"FAILED: {gpus} GPUs do not split evenly over {nnodes} nodes of {c.gpus_per_node}"
     qos = entry.get("qos") or c.qos
     qos = c.high_qos if qos == "high" else qos
     env = {k: v for k, v in os.environ.items() if k.lower() not in ("http_proxy", "https_proxy")}
-    env.update(CONFIG=f"experiments/{group}/{entry['name']}", NNODES=str(-(-gpus // per_node)),
+    env.update(CONFIG=f"experiments/{group}/{entry['name']}", NNODES=str(nnodes),
                GPUS_PER_NODE=str(per_node), CPUS_PER_NODE=str(c.cpus_per_gpu * per_node),
                MEM_PER_NODE=f"{c.mem_per_gpu_gb * per_node}G", STEPS_OVERRIDE=str(entry["steps"]),
                TIME_LIMIT="3-00:00:00", SLURM_EXCLUDE=c.exclude, SLURM_QOS=qos, SBATCH_QOS=qos)

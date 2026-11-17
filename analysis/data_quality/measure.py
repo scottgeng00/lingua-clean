@@ -37,7 +37,7 @@ import os
 import numpy as np
 
 DATA = "/home/sgeng/scottg/pretrain/assets/data"
-FASTTEXT = "/checkpoint/dream-sc-3/scottg/pretrain/assets/models/dclm-fasttext/openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train.bin"
+FASTTEXT = "/home/sgeng/scottg/pretrain/assets/models/dclm-fasttext/openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train.bin"
 EMBED = "Qwen/Qwen3-Embedding-8B"
 TOPIC, FORMAT = "WebOrganizer/TopicClassifier-NoURL", "WebOrganizer/FormatClassifier-NoURL"
 N_CHUNKS, Q_PER_CHUNK, G_PER_CHUNK, SUB = 16, 3125, 320, 1024

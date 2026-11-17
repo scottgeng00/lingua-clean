@@ -7,7 +7,7 @@ are chosen at submit time).
 
     python setup/build_dclm_rewrite_manifest.py \
         /home/sgeng/scottg/pretrain/assets/data/dclm_subsets/dclm_8m_1 \
-        /checkpoint/dream-sc-3/scottg/pretrain/simplescale/runs/manifests/dclm_8m_1.g1.max4096.manifest.jsonl
+        /home/sgeng/scottg/pretrain/simplescale/runs/manifests/dclm_8m_1.g1.max4096.manifest.jsonl
 """
 
 import argparse

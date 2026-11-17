@@ -31,8 +31,8 @@ import numpy as np
 import orjson
 
 SUBSET = "/home/sgeng/scottg/pretrain/assets/data/dclm_subsets/dclm_8m_1"
-OUT = "/checkpoint/dream-sc-3/scottg/pretrain/simplescale/runs/manifests"
-REPORT = "/checkpoint/dream-sc-3/scottg/pretrain/lingua-runs/analysis/rewrite_quality/report.json"
+OUT = "/home/sgeng/scottg/pretrain/simplescale/runs/manifests"
+REPORT = "/home/sgeng/scottg/pretrain/lingua-runs/analysis/rewrite_quality/report.json"
 EXCLUDE = {"Truncated", "Spam / Ads", "Legal Notices", "Knowledge Article"}
 N_CHUNKS, ROWS, ROWS_K4 = 16, 4_000_000, 2_000_000
 METHODS = ("iid", "t12", "gacha", "nemo", "wofmt")

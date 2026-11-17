@@ -17,7 +17,7 @@ Rows: {"id", "text", "src_row", "finish_reason", "source_truncated"} plus "view"
 wofmt: format label) or "gacha" (decisions + idea) when the run has them.
 
     python setup/prepare_dclm_multirewrites.py --method t12 \
-        --run /checkpoint/dream-sc-3/scottg/pretrain/simplescale/runs/dclm_8m_1_rewrite_first4m-qwen35-9b-t12
+        --run /home/sgeng/scottg/pretrain/simplescale/runs/dclm_8m_1_rewrite_first4m-qwen35-9b-t12
 """
 
 import argparse

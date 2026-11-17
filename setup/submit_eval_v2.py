@@ -21,7 +21,7 @@ import subprocess
 
 import yaml
 
-GENSCALE = "/checkpoint/dream-sc-3/scottg/pretrain/lingua-runs/runs/midtrain/experiments/genscale"
+GENSCALE = "/home/sgeng/scottg/pretrain/lingua-runs/runs/midtrain/experiments/genscale"
 OLMES_ROOT = "/home/sgeng/scottg/pretrain/olmes"
 SUITE = "lingua:v2"
 
