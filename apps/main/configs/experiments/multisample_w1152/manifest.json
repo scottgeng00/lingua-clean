@@ -1,0 +1,57 @@
+{
+ "dclm_2x": {
+  "name": "dclm_2x",
+  "gpus": 32,
+  "steps": 16398,
+  "arm": null,
+  "r": 0,
+  "lr": 0.0021,
+  "bs": 256,
+  "wd": 0.1,
+  "qos": "h100_mdf_scale"
+ },
+ "syn_direct_nothink": {
+  "name": "syn_direct_nothink",
+  "gpus": 32,
+  "steps": 16398,
+  "arm": "direct_nothink",
+  "r": 0.5,
+  "lr": 0.0021,
+  "bs": 256,
+  "wd": 0.1,
+  "qos": "h100_mdf_scale"
+ },
+ "syn_mix": {
+  "name": "syn_mix",
+  "gpus": 32,
+  "steps": 16398,
+  "arm": "mix",
+  "r": 0.5,
+  "lr": 0.0021,
+  "bs": 256,
+  "wd": 0.1,
+  "qos": "h100_mdf_scale"
+ },
+ "syn_ideas": {
+  "name": "syn_ideas",
+  "gpus": 32,
+  "steps": 16398,
+  "arm": "ideas",
+  "r": 0.5,
+  "lr": 0.0021,
+  "bs": 256,
+  "wd": 0.1,
+  "qos": "h100_mdf_scale"
+ },
+ "syn_direct_think": {
+  "name": "syn_direct_think",
+  "gpus": 32,
+  "steps": 16398,
+  "arm": "direct_think",
+  "r": 0.5,
+  "lr": 0.0021,
+  "bs": 256,
+  "wd": 0.1,
+  "qos": "h100_mdf_scale"
+ }
+}

@@ -388,6 +388,71 @@ def _kd_chunk(student_chunk, teacher_chunk, labels_chunk, temperature: float):
     return kl, ce, t_ent, s_ent
 
 
+@torch.compile(dynamic=False)
+def _kd_chunk_fused(student_chunk, teacher_chunk, labels_chunk, inv_n, temperature: float, alpha: float):
+    """Like `_kd_chunk`, but also returns d(loss)/d(student_chunk) for
+    loss = (alpha * T^2 * sum KL + (1 - alpha) * sum CE) * inv_n, so no fp32 softmax tensors are kept
+    for backward (only one bf16 gradient buffer the size of the student logits)."""
+    s = student_chunk.float()
+    valid = labels_chunk != -100
+    idx = labels_chunk.clamp(min=0).unsqueeze(-1)
+    t_lp = F.log_softmax(teacher_chunk.float() / temperature, dim=-1)
+    t_p = t_lp.exp()
+    s_lp = F.log_softmax(s / temperature, dim=-1)
+    s_p = s_lp.exp()
+    if temperature == 1.0:
+        s_lp1, s_p1 = s_lp, s_p
+    else:
+        s_lp1 = F.log_softmax(s, dim=-1)
+        s_p1 = s_lp1.exp()
+    kl = (t_p * (t_lp - s_lp)).sum(-1)
+    ce = -s_lp1.gather(-1, idx).squeeze(-1) * valid
+    t_ent = -(t_p * t_lp).sum(-1)
+    s_ent = -(s_p * s_lp).sum(-1)
+    # d/ds [T^2 KL(p_t || softmax(s/T))] = T (softmax(s/T) - p_t);  d/ds CE = softmax(s) - onehot(y)
+    g = (alpha * temperature) * (s_p - t_p) + (1.0 - alpha) * s_p1
+    g = g.scatter_add(-1, idx, torch.full_like(idx, -(1.0 - alpha), dtype=g.dtype))
+    g = g * (valid.unsqueeze(-1) * inv_n)
+    return kl, ce, t_ent, s_ent, g.to(student_chunk.dtype)
+
+
+class _FusedKDLoss(torch.autograd.Function):
+    """Forward KL(teacher || student) + CE with the student-logit gradient computed in the forward pass,
+    chunk by chunk along the sequence (memory: one gradient buffer instead of saved fp32 activations)."""
+
+    @staticmethod
+    def forward(ctx, student_logits, teacher_logits, labels, temperature, alpha, chunk_size, reuse_teacher):
+        mask = labels != -100
+        inv_n = 1.0 / mask.sum().clamp(min=1).float()
+        # reuse_teacher: overwrite the (no-grad, no longer needed) teacher logits chunk by chunk with the
+        # gradient, saving one logits-sized buffer. Each chunk is read before it is overwritten.
+        reuse = (reuse_teacher and not teacher_logits.is_inference()
+                 and teacher_logits.shape == student_logits.shape
+                 and teacher_logits.dtype == student_logits.dtype and teacher_logits.is_contiguous())
+        grad = teacher_logits if reuse else torch.empty_like(student_logits)
+        parts = []
+        for c in range(0, student_logits.shape[1], chunk_size):
+            t_chunk = teacher_logits[:, c:c + chunk_size]
+            kl, ce, te, se, g = _kd_chunk_fused(
+                student_logits[:, c:c + chunk_size], t_chunk if not t_chunk.is_inference() else t_chunk.clone(),
+                labels[:, c:c + chunk_size], inv_n, float(temperature), float(alpha))
+            grad[:, c:c + chunk_size] = g
+            parts.append((kl, ce, te, se))
+            del g
+        kl, ce, te, se = (torch.cat(x, dim=1) for x in zip(*parts))
+        kl_mean = (kl * mask).sum() * inv_n
+        ce_mean = (ce * mask).sum() * inv_n
+        total = alpha * (temperature ** 2) * kl_mean + (1 - alpha) * ce_mean
+        ctx.save_for_backward(grad)
+        ctx.mark_non_differentiable(kl, ce, te, se)
+        return total, kl, ce, te, se
+
+    @staticmethod
+    def backward(ctx, grad_total, *unused):
+        (grad,) = ctx.saved_tensors
+        return grad.mul_(grad_total.to(grad.dtype)), None, None, None, None, None, None
+
+
 def compute_kl_distillation_loss(
     student_logits: torch.Tensor,   # (batch_size, seq_len, vocab_size)
     teacher_logits: torch.Tensor,   # (batch_size, seq_len, vocab_size)
@@ -395,6 +460,7 @@ def compute_kl_distillation_loss(
     temperature: float = 1.0,
     alpha: float = 0.5,
     chunk_size: int = 1024,  # Process this many tokens at a time to save memory
+    reuse_teacher_buffer: bool = False,  # fused path: write the gradient into teacher_logits (clobbers it)
 ) -> tuple:
     """
     Memory-efficient Classic Knowledge Distillation: minimize KL divergence between student and teacher.
@@ -417,6 +483,25 @@ def compute_kl_distillation_loss(
     """
     mask = labels != -100
     n_valid = mask.sum().clamp(min=1)
+
+    if os.environ.get("LINGUA_KD_LEGACY", "0") != "1":
+        # Default: fused forward+gradient (same loss; avoids keeping fp32 softmaxes for backward).
+        total_loss, kl_per_token, ce_per_token, t_ent, s_ent = _FusedKDLoss.apply(
+            student_logits, teacher_logits, labels, float(temperature), float(alpha), int(chunk_size),
+            bool(reuse_teacher_buffer))
+        with torch.no_grad():
+            kl_loss_scaled = (kl_per_token * mask).sum() / n_valid * (temperature ** 2)
+            ce_loss_mean = (ce_per_token * mask).sum() / n_valid
+            valid_kl = kl_per_token[mask]
+            vals = torch.stack([kl_loss_scaled, ce_loss_mean, total_loss.detach(), valid_kl.mean(),
+                                valid_kl.std(), ce_per_token[mask].mean(), t_ent[mask].mean(),
+                                s_ent[mask].mean()]).tolist()  # one sync
+        stats = dict(zip(["kd/kl_loss", "kd/ce_loss", "kd/total_loss", "kd/kl_per_token_mean",
+                          "kd/kl_per_token_std", "kd/ce_per_token_mean", "kd/teacher_entropy_mean",
+                          "kd/student_entropy_mean"], vals))
+        stats["kd/temperature"] = temperature
+        stats["kd/alpha"] = alpha
+        return total_loss, stats
 
     # Teacher logits come from torch.inference_mode; the compiled backward saves its inputs, which
     # inference tensors may not be, so each teacher chunk is cloned into a normal tensor.
@@ -1878,6 +1963,9 @@ class TrainArgs:
 
     # Nb optimizer steps to take
     steps: int = 1000
+    # End training early at this step (saving a checkpoint there) while keeping the LR schedule of `steps`: a WSD
+    # trunk that later runs branch off.
+    stop_step: Optional[int] = None
 
     # On-the-fly teacher model for token-level delta weighting.
     # When set, loads a frozen HF model and computes teacher logprobs each step
@@ -2760,7 +2848,7 @@ def train(args: TrainArgs):
         # Objects alive now (model, optimizer, compiled code, ...) are never garbage; keep the periodic gc.collect()
         # from rescanning them.
         gc.freeze()
-        while train_state.step < args.steps:
+        while train_state.step < (args.stop_step or args.steps):
             # We constrain train_state.acc_step to be in range 0 to args.grad_acc_steps - 1
             train_state.acc_step = (train_state.acc_step + 1) % args.grad_acc_steps
 
@@ -4911,7 +4999,9 @@ def train(args: TrainArgs):
 
                 # Recompute teacher logits for KL distillation (need full logits, not just NLL).
                 # With cross-doc attention disabled the teacher is document-masked too.
-                with torch.inference_mode():
+                # Fused KD path: no_grad (not inference_mode) so the logits buffer can be reused for the gradient.
+                _kd_fused = os.environ.get("LINGUA_KD_LEGACY", "0") != "1"
+                with (torch.no_grad() if _kd_fused else torch.inference_mode()):
                     if cu_seqlens_tensor is not None:
                         teacher_logits_for_kd = teacher_logits_packed(
                             teacher_model, input_ids, cu_seqlens_tensor, max_seqlen
@@ -4952,6 +5042,8 @@ def train(args: TrainArgs):
                     labels=labels,
                     temperature=getattr(args.data, 'kl_temperature', 2.0),
                     alpha=getattr(args.data, 'kl_alpha', 0.5),
+                    chunk_size=int(os.environ.get("LINGUA_KD_CHUNK", 256)),
+                    reuse_teacher_buffer=_kd_fused and not bool(getattr(args.data, 'kd_diagnostics_enabled', False)),
                 )
 
                 if bool(getattr(args.data, 'kd_diagnostics_enabled', False)):
@@ -4974,6 +5066,8 @@ def train(args: TrainArgs):
                     batch_delta_stats.update(_kd_diag_stats)
 
                 del teacher_logits_for_kd  # Free memory
+                if os.environ.get("LINGUA_KD_LEGACY", "0") != "1":
+                    logits = None  # the fused KD loss keeps its own gradient buffer; free the logits
 
                 if train_state.step == 0 and train_state.acc_step == 1 and get_is_master():
                     logger.info("=" * 60)
@@ -7484,7 +7578,9 @@ def train(args: TrainArgs):
             saved = False
             is_dump_step = every_n_steps(
                 train_state, args.checkpoint.dump.every, acc_step=0
-            ) or (train_state.acc_step == 0 and train_state.step in args.checkpoint.extra_save_steps)
+            ) or (train_state.acc_step == 0 and train_state.step in args.checkpoint.extra_save_steps) or (
+                train_state.acc_step == 0 and train_state.step == args.stop_step
+            )
             # the last step counts as an eval step too, so the final checkpoint is saved
             # here and evaluated even when steps isn't a multiple of eval.every
             is_eval_step = every_n_steps(train_state, args.checkpoint.eval.every, acc_step=0) or (

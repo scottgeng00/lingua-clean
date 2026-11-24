@@ -1,0 +1,151 @@
+{
+ "args": {
+  "chunks": 48,
+  "groups": 256,
+  "batches": 5,
+  "batch_size": 256,
+  "max_tokens": 4096,
+  "seed": 0,
+  "out": "analysis/multisample_vendi_gensize.json"
+ },
+ "documents": 3072,
+ "results": {
+  "q2b_direct_nothink": {
+   "within_vendi": 1.7773139523342252,
+   "within_vendi_sem": 0.020726124489369984,
+   "within_cos": 0.8666070085018873,
+   "across_vendi": 146.60393371582032,
+   "across_vendi_sem": 0.5799710085993814,
+   "across_cos": 0.09936123341321945,
+   "mean_tokens": 961.2996254681648
+  },
+  "q2b_mix": {
+   "within_vendi": 2.8187853205017745,
+   "within_vendi_sem": 0.02572656234176415,
+   "within_cos": 0.6884778740350157,
+   "across_vendi": 136.85580139160157,
+   "across_vendi_sem": 0.532665208229672,
+   "across_cos": 0.11331442892551422,
+   "mean_tokens": 844.5582137161084
+  },
+  "q9b_direct_nothink": {
+   "within_vendi": 1.4155739746056497,
+   "within_vendi_sem": 0.012031016291453808,
+   "within_cos": 0.9283965325448662,
+   "across_vendi": 146.77188110351562,
+   "across_vendi_sem": 0.6814512426118863,
+   "across_cos": 0.1023176670074463,
+   "mean_tokens": 1005.2200374531835
+  },
+  "q9b_mix": {
+   "within_vendi": 2.498886313755065,
+   "within_vendi_sem": 0.020502305068621992,
+   "within_cos": 0.7256740289740264,
+   "across_vendi": 142.0352020263672,
+   "across_vendi_sem": 0.4623549371001163,
+   "across_cos": 0.10714126974344254,
+   "mean_tokens": 863.6334728867623
+  },
+  "q27b_direct_nothink": {
+   "within_vendi": 1.3436816800385714,
+   "within_vendi_sem": 0.010688751704501804,
+   "within_cos": 0.9410610056947917,
+   "across_vendi": 145.95854797363282,
+   "across_vendi_sem": 0.512248106157758,
+   "across_cos": 0.1057677373290062,
+   "mean_tokens": 1054.9113607990012
+  },
+  "q27b_mix": {
+   "within_vendi": 2.4479267918504775,
+   "within_vendi_sem": 0.0190897111568893,
+   "within_cos": 0.7343377305660397,
+   "across_vendi": 142.7712890625,
+   "across_vendi_sem": 0.35356527794893333,
+   "across_cos": 0.10458577126264572,
+   "mean_tokens": 838.2507974481658
+  },
+  "real": {
+   "across_vendi": 143.7662841796875,
+   "across_vendi_sem": 0.40280284029995567,
+   "across_cos": 0.11827757954597473,
+   "mean_tokens": 1157.4092165898617
+  },
+  "q2b_mix_by_format": {
+   "article": 125.33102264404297,
+   "discussion": 102.79686584472657,
+   "faq": 138.25404663085936,
+   "math": 86.76935577392578,
+   "narrative": 121.17029418945313,
+   "table": 132.70958862304687,
+   "tutorial": 131.80514831542968,
+   "wiki": 147.0066711425781
+  },
+  "q2b_mix_cross_doc_cos": {
+   "same_format": 0.14791840314865112,
+   "different_format": 0.11111954599618912
+  },
+  "q9b_mix_by_format": {
+   "article": 129.8628173828125,
+   "discussion": 116.18489532470703,
+   "faq": 139.42739868164062,
+   "math": 88.74124450683594,
+   "narrative": 129.36558685302734,
+   "table": 132.12669372558594,
+   "tutorial": 128.3192932128906,
+   "wiki": 147.39151306152343
+  },
+  "q9b_mix_cross_doc_cos": {
+   "same_format": 0.14590522646903992,
+   "different_format": 0.10522507131099701
+  },
+  "q27b_mix_by_format": {
+   "article": 129.80593566894532,
+   "discussion": 120.03231506347656,
+   "faq": 139.54188232421876,
+   "math": 89.23669128417968,
+   "narrative": 129.58655853271483,
+   "table": 127.63758544921875,
+   "tutorial": 131.3373992919922,
+   "wiki": 145.557568359375
+  },
+  "q27b_mix_cross_doc_cos": {
+   "same_format": 0.14518800377845764,
+   "different_format": 0.10153385996818542
+  },
+  "view_source_cos": {
+   "q27b_direct_nothink": 0.8622137856374034,
+   "q27b_direct_nothink:all": 0.8622137856374034,
+   "q27b_mix:all": 0.7817569498813921,
+   "q27b_mix:article": 0.8157022577276977,
+   "q27b_mix:discussion": 0.8624886495177098,
+   "q27b_mix:faq": 0.8688891175155815,
+   "q27b_mix:math": 0.4834442466634759,
+   "q27b_mix:narrative": 0.791375540176295,
+   "q27b_mix:table": 0.7721591004028848,
+   "q27b_mix:tutorial": 0.7971315591016672,
+   "q27b_mix:wiki": 0.8628651279458253,
+   "q2b_direct_nothink": 0.8308862538658259,
+   "q2b_direct_nothink:all": 0.8308862538658259,
+   "q2b_mix:all": 0.749933619082429,
+   "q2b_mix:article": 0.8084837606425659,
+   "q2b_mix:discussion": 0.7554883493256459,
+   "q2b_mix:faq": 0.8347276584755989,
+   "q2b_mix:math": 0.4893477664788335,
+   "q2b_mix:narrative": 0.7318293146960746,
+   "q2b_mix:table": 0.771108707222521,
+   "q2b_mix:tutorial": 0.7773808973176138,
+   "q2b_mix:wiki": 0.8311024985005778,
+   "q9b_direct_nothink": 0.85990092337743,
+   "q9b_direct_nothink:all": 0.85990092337743,
+   "q9b_mix:all": 0.7760806618387112,
+   "q9b_mix:article": 0.8135559869801394,
+   "q9b_mix:discussion": 0.8498371021538835,
+   "q9b_mix:faq": 0.8609185141352464,
+   "q9b_mix:math": 0.46294595578573816,
+   "q9b_mix:narrative": 0.776485909761921,
+   "q9b_mix:table": 0.7808318533106333,
+   "q9b_mix:tutorial": 0.8024995891454583,
+   "q9b_mix:wiki": 0.8615703834366688
+  }
+ }
+}

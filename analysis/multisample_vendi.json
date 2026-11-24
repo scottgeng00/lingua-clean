@@ -1,0 +1,83 @@
+{
+ "args": {
+  "chunks": 48,
+  "groups": 256,
+  "batches": 5,
+  "batch_size": 256,
+  "max_tokens": 4096,
+  "seed": 0,
+  "out": "analysis/multisample_vendi.json"
+ },
+ "documents": 3031,
+ "results": {
+  "direct_nothink": {
+   "within_vendi": 1.3991111400537193,
+   "within_vendi_sem": 0.011248981762945096,
+   "within_cos": 0.9314545490778983,
+   "across_vendi": 147.01852722167968,
+   "across_vendi_sem": 0.39371890457586134,
+   "across_cos": 0.1028931513428688,
+   "mean_tokens": 990.1532710280374
+  },
+  "direct_think": {
+   "within_vendi": 1.4276302945800126,
+   "within_vendi_sem": 0.010475255823547625,
+   "within_cos": 0.9267444156575948,
+   "across_vendi": 140.91253967285155,
+   "across_vendi_sem": 0.4923080731555242,
+   "across_cos": 0.11529323905706405,
+   "mean_tokens": 1057.1370716510903
+  },
+  "mix": {
+   "within_vendi": 2.4482583799399436,
+   "within_vendi_sem": 0.019099836607713302,
+   "within_cos": 0.7336473721079528,
+   "across_vendi": 141.91825256347656,
+   "across_vendi_sem": 0.4413058664440642,
+   "across_cos": 0.10819030851125717,
+   "mean_tokens": 883.4494404476419
+  },
+  "ideas": {
+   "within_vendi": 4.454427473247051,
+   "within_vendi_sem": 0.04027483543138486,
+   "within_cos": 0.4989366123918444,
+   "across_vendi": 117.80796508789062,
+   "across_vendi_sem": 0.9486387670763821,
+   "across_cos": 0.16224034428596495,
+   "mean_tokens": 605.0420560747664
+  },
+  "real": {
+   "across_vendi": 143.8623840332031,
+   "across_vendi_sem": 0.42812412703905417,
+   "across_cos": 0.11921641677618026,
+   "mean_tokens": 1169.2003693444137
+  },
+  "mix_by_format": {
+   "article": 129.60834045410155,
+   "discussion": 116.41388854980468,
+   "faq": 139.32082824707032,
+   "math": 88.35667572021484,
+   "narrative": 128.06495666503906,
+   "table": 131.4798126220703,
+   "tutorial": 128.59825744628907,
+   "wiki": 146.745166015625
+  },
+  "mix_cross_doc_cos": {
+   "same_format": 0.14356228709220886,
+   "different_format": 0.10413049906492233
+  },
+  "view_source_cos": {
+   "direct_nothink": 0.86378239742046,
+   "direct_think": 0.8646843602675206,
+   "ideas": 0.5606257731468284,
+   "mix:article": 0.8141345322297221,
+   "mix:discussion": 0.8510308746155609,
+   "mix:faq": 0.8593240394046322,
+   "mix:math": 0.46802254914136693,
+   "mix:narrative": 0.7727526866608159,
+   "mix:table": 0.7802290588975063,
+   "mix:tutorial": 0.7990800631426048,
+   "mix:wiki": 0.861748642538393
+  }
+ }
+}

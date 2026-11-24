@@ -39,11 +39,10 @@ fi
 NNODES="${NNODES:-2}"
 STEPS_OVERRIDE="${STEPS_OVERRIDE:-9600}"
 
-# From-scratch pretraining has no teacher, so the FP8/compile toggles are
-# vestigial here. Kept at 0 so the inner script doesn't try to FP8-convert
-# something that doesn't exist.
-LINGUA_TEACHER_FP8=0
-LINGUA_COMPILE_TEACHER=0
+# Teacher FP8/compile toggles: default 0 (no-teacher pretraining); KD runs set them via env
+# (e.g. manifest `env` in scripts/dataconstrained_orchestrate.py).
+LINGUA_TEACHER_FP8="${LINGUA_TEACHER_FP8:-0}"
+LINGUA_COMPILE_TEACHER="${LINGUA_COMPILE_TEACHER:-0}"
 
 SLURM_LOG_DIR="${SLURM_LOG_DIR:-${HOME}/lingua-runs/slurm_logs}"
 mkdir -p "${SLURM_LOG_DIR}"

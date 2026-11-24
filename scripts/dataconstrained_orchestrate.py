@@ -34,7 +34,7 @@ def resolve(p):
 
 def launch(entry, dry, group):
     """Submit one run, sized for this cluster (lingua/cluster.py). Manifest `qos`: omitted = the profile's default
-    QoS, "high" = its high-priority QoS, anything else = that QoS verbatim."""
+    QoS, "high" = its high-priority QoS, anything else = that QoS verbatim. Manifest `env`: extra environment."""
     c, gpus = CLUSTER, entry["gpus"]
     # Spread the run evenly over the fewest nodes, so the DP world size (and thus the global batch) is exactly
     # `gpus`: 12 GPUs is 3x4 on Dalton but 2x6 on 8-GPU nodes, not 2x8.
@@ -49,6 +49,7 @@ def launch(entry, dry, group):
                GPUS_PER_NODE=str(per_node), CPUS_PER_NODE=str(c.cpus_per_gpu * per_node),
                MEM_PER_NODE=f"{c.mem_per_gpu_gb * per_node}G", STEPS_OVERRIDE=str(entry["steps"]),
                TIME_LIMIT="3-00:00:00", SLURM_EXCLUDE=c.exclude, SLURM_QOS=qos, SBATCH_QOS=qos)
+    env.update(entry.get("env", {}))  # per-run switches, e.g. LINGUA_TEACHER_FP8=1 for KD runs
     if dry:
         return "dry-run"
     cmd = f"cd {ROOT} && source scripts/env.sh >/dev/null && bash scripts/launch_pretrain.sh"
@@ -86,10 +87,10 @@ def main():
             continue  # queued or running (or finishing: the eval launch follows the final save)
         if os.path.isfile(f"{runs}/{name}/evals/{e['steps']:010d}/validation.json"):
             continue  # trained and evaluated (its checkpoints may have been pruned to consolidated weights only)
-        if ckpt_done(f"{runs}/{name}/checkpoints/{e['steps']:010d}"):
+        if ckpt_done(f"{runs}/{name}/checkpoints/{e.get('done_step', e['steps']):010d}"):  # done_step: stop_step trunk
             # Trained; make sure its eval was launched (a failed launch or a preemption right after the final save
             # leaves no evals/<step> folder).
-            if not os.path.isdir(f"{runs}/{name}/evals/{e['steps']:010d}") and not a.dry_run:
+            if not e.get("no_eval") and not os.path.isdir(f"{runs}/{name}/evals/{e['steps']:010d}") and not a.dry_run:
                 print(f"launching missing eval for {name}: {launch_eval(e, a.group)}")
             continue
         if "branch_from" in e and not ckpt_done(resolve(e["branch_from"])):

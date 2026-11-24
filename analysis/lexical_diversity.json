@@ -1,0 +1,149 @@
+{
+ "real (sources)": {
+  "batch": {
+   "words": 300000,
+   "types": 24307,
+   "hapax_share": 0.44629119183774224
+  }
+ },
+ "direct_nothink (9B)": {
+  "docs": 3072,
+  "views_per_doc": 7.9873046875,
+  "batch": {
+   "words": 300000,
+   "types": 23855,
+   "hapax_share": 0.3810941102494236
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 23169,
+   "hapax_share": 0.38150114376969224
+  }
+ },
+ "direct_think (9B)": {
+  "docs": 3072,
+  "views_per_doc": 7.986328125,
+  "batch": {
+   "words": 300000,
+   "types": 23571,
+   "hapax_share": 0.3829705994654448
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 22611,
+   "hapax_share": 0.37623280704082085
+  }
+ },
+ "mix (9B)": {
+  "docs": 3072,
+  "views_per_doc": 7.928385416666667,
+  "batch": {
+   "words": 300000,
+   "types": 22443,
+   "hapax_share": 0.3792273760192488
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 21764,
+   "hapax_share": 0.38274214298842124
+  }
+ },
+ "ideas (9B)": {
+  "docs": 3072,
+  "views_per_doc": 7.983072916666667,
+  "batch": {
+   "words": 300000,
+   "types": 21891,
+   "hapax_share": 0.35649353615641133
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 21223,
+   "hapax_share": 0.3435895019554257
+  }
+ },
+ "arv2 (9B)": {
+  "docs": 3072,
+  "views_per_doc": 24.819010416666668,
+  "batch": {
+   "words": 300000,
+   "types": 21352,
+   "hapax_share": 0.39888535031847133
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 21173,
+   "hapax_share": 0.3856798753128985
+  }
+ },
+ "basegen (9B base)": {
+  "docs": 3072,
+  "views_per_doc": 7.038411458333333,
+  "batch": {
+   "words": 300000,
+   "types": 26431,
+   "hapax_share": 0.4863607127993644
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 25856,
+   "hapax_share": 0.49257425742574257
+  }
+ },
+ "direct_nothink (2B)": {
+  "docs": 3071,
+  "views_per_doc": 13.945945945945946,
+  "batch": {
+   "words": 300000,
+   "types": 23115,
+   "hapax_share": 0.38953060783041316
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 22129,
+   "hapax_share": 0.3759772244565954
+  }
+ },
+ "direct_nothink (27B)": {
+  "docs": 3072,
+  "views_per_doc": 11.989583333333334,
+  "batch": {
+   "words": 300000,
+   "types": 23435,
+   "hapax_share": 0.38707062086622573
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 23878,
+   "hapax_share": 0.3794706424323645
+  }
+ },
+ "mix (2B)": {
+  "docs": 3072,
+  "views_per_doc": 23.010091145833332,
+  "batch": {
+   "words": 300000,
+   "types": 21752,
+   "hapax_share": 0.3745402721588819
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 22024,
+   "hapax_share": 0.3818107519070105
+  }
+ },
+ "mix (27B)": {
+  "docs": 3072,
+  "views_per_doc": 15.972981770833334,
+  "batch": {
+   "words": 300000,
+   "types": 22239,
+   "hapax_share": 0.38320068348396963
+  },
+  "corpus": {
+   "words": 300000,
+   "types": 22124,
+   "hapax_share": 0.3727626107394684
+  }
+ }
+}
